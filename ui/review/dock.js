@@ -124,9 +124,13 @@ export function fitRow(row, { more, host }) {
   const ro = new ResizeObserver(later); ro.observe(row);
   // the app shows/hides buttons and changes their text (render progress): refit on those too; text changes inside a
   // [data-fit-static] element (fixed width, e.g. the transport's timecode, rewritten every frame) never refit
-  const isStatic = r => r.type !== 'attributes' && !!(r.target.nodeType === 1 ? r.target : r.target.parentElement)?.closest?.('[data-fit-static]');
+  // a per-frame `btn.hidden = x` with the value it already has still queues a record: only a changed attribute counts. Without this
+  // the refit (a forced layout of the whole row) ran on every frame of playback, about a third of the main thread
+  // the "⋯" button is the fitter's own: refit shows/hides it on every run, and watching that made every run schedule the next (an endless
+  // loop whenever the row overflowed)
+  const isStatic = r => r.target === more || (r.type === 'attributes' ? r.target.getAttribute(r.attributeName) === r.oldValue : !!(r.target.nodeType === 1 ? r.target : r.target.parentElement)?.closest?.('[data-fit-static]'));
   const mo = new MutationObserver(recs => { if (recs.some(r => !isStatic(r))) later(); });
-  mo.observe(row, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'], characterData: true });
+  mo.observe(row, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['hidden'], characterData: true });
   later();
   return { refit: later, destroy() { ro.disconnect(); mo.disconnect(); cancelAnimationFrame(raf); pop?.close(); } };
 }

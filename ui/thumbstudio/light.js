@@ -44,12 +44,10 @@ export function drawLightGizmo(ctx, light, W, H) {
   ctx.fill();
   ctx.stroke();
 
-  // Sun icon ☀
-  ctx.fillStyle = '#000000';
-  ctx.font = '14px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('☀', x, y);
+  // sun marker: a dot with eight rays
+  ctx.fillStyle = '#000000'; ctx.strokeStyle = '#000000'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2); ctx.fill();
+  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * 5.5, y + Math.sin(a) * 5.5); ctx.lineTo(x + Math.cos(a) * 8, y + Math.sin(a) * 8); ctx.stroke(); }
 
   ctx.restore();
 }

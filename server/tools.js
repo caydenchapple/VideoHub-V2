@@ -66,10 +66,10 @@ export const TOOLS = {
       const li = await call('GET', `/api/project/${p.id}/live`);   // also starts watching the code for changes
       if (!li.ok) return `The live preview could not open: ${li.reason}\nWhat it needs (docs/PROJECT-CONTRACT.md): the page defines window.renderOut(t), which draws second t synchronously on fixed-size canvases, and sets window.READY = true when ready; the sound in audio/mix.wav. Anything different goes in .videohub/project.json → live: {page, audio, dur, fps}.`;
       let how = 'none';
-      if (a.open !== false) how = (await call('POST', '/api/show', { hash: `#/review/${p.id}/~live` })).how;
+      if (a.open !== false) how = (await call('POST', '/api/show', { hash: `#/review/${p.id}/~live`, label: `the film "${p.title}"` })).how;
       return [
         `Live preview ready: "${p.title}" · ${li.page} · ${li.fps} fps · ${TC(li.dur)} (length from: ${li.durFrom}) · sound: ${li.audioName || 'none'}`,
-        how === 'window' ? 'The open VideoHub window switched to this film.' : how === 'opened' ? 'A VideoHub window opened.' : '',
+        how === 'window' ? 'The open VideoHub window shows this film (if the user is busy in another film it only offers a link, it never takes them away from it).' : how === 'opened' ? 'A VideoHub window opened.' : '',
         'Now STOP, do not render. Tell the user (in their language): watch it in VideoHub, leave notes on the frames, then press "Send to Claude" and paste the message here. Get the notes with hub_notes, fix the code (the preview reloads itself), mark each with hub_note_update. Render with hub_render only when the user asks for a render.',
         li.durFrom === 'default' ? 'The film length is unknown (60 s assumed): save it with hub_project({set:{render:{env:{DUR:"…"}}}}).' : '',
       ].filter(Boolean).join('\n');
@@ -84,7 +84,7 @@ export const TOOLS = {
       const films = (roots.find(r => r.type === 'container') || {}).path;
       return [
         `Workspace: ${c.workspace}`,
-        films ? `New films go in: ${films}\\<film-name>  (one folder per film; copy templates\\new-film from the VideoHub folder)` : 'No films folder is set: ask the user to add one in VideoHub > Settings > Folders.',
+        films ? `New films go in: ${films}${path.sep}<film-name>  (one folder per film; copy templates${path.sep}new-film from the VideoHub folder)` : 'No films folder is set: ask the user to add one in VideoHub > Settings > Folders.',
         `Finished renders are collected in: ${c.outputsDir}  (VideoHub links every render there by day; do not write there)`,
         `Sounds: ${c.soundLibDir}  ·  Thumbnails: ${c.thumbstudio?.globalDir}  ·  Archive: ${c.archiveDir}`,
         roots.length > 1 ? 'Other watched folders: ' + roots.filter(r => r.path !== films).map(r => `${r.path} (${r.type})`).join(', ') : '',

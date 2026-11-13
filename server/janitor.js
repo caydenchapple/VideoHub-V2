@@ -9,6 +9,7 @@ import { config } from './config.js';
 import { index } from './scan.js';
 import * as jobs from './jobs.js';
 import { guardState } from './guard.js';
+import { IS_MAC, moveToTrashMac } from './platform.js';
 import { DATA_DIR, TEMP, powershell, fingerprint, processAlive, shortPath, writeJson, now, isInside } from './util.js';
 
 const DONE = new Set(['approved', 'published', 'archived', 'done']);
@@ -64,7 +65,7 @@ const cid = s => crypto.createHash('sha1').update(s.toLowerCase()).digest('hex')
 function busyWhy(p) {
   if (jobs.list().some(j => j.project === p.id && (j.state === 'running' || j.state === 'queued'))) return 'a render is in the VideoHub queue';
   try { const g = guardState(); if (g.running && (g.renders || []).some(r => [r.project, r.dir, r.cwd, r.path].some(x => typeof x === 'string' && x && (isInside(x, p.path) || isInside(p.path, x))))) return 'currently rendering'; } catch { }
-  for (const f of ['render\\log.txt', 'render.log', 'render_log.txt']) { try { if (Date.now() - fs.statSync(path.join(p.path, f)).mtimeMs < 10 * 60e3) return 'render log updated in the last 10 minutes'; } catch { } }
+  for (const f of [['render', 'log.txt'], ['render.log'], ['render_log.txt']]) { try { if (Date.now() - fs.statSync(path.join(p.path, ...f)).mtimeMs < 10 * 60e3) return 'render log updated in the last 10 minutes'; } catch { } }
   try { if (fs.readdirSync(path.join(p.outDir || p.path, 'render', 'chunks')).some(f => f.endsWith('.tmp.mp4') && Date.now() - fs.statSync(path.join(p.outDir || p.path, 'render', 'chunks', f)).mtimeMs < 10 * 60e3)) return 'unfinished render chunk found (a render may still be running)'; } catch { }
   return null;
 }
@@ -190,8 +191,8 @@ async function computeCandidates() {
     }
     // 5. chunks / parts of a finished film (needed only for partial re-renders while still being reviewed)
     if (DONE.has(p.status) && !p.statusAuto && !(p.notesOpen > 0) && newestFinal) {
-      for (const d of ['render\\chunks', 'render\\preview']) {
-        const full = path.join(p.outDir || p.path, d); if (!exists(full)) continue;
+      for (const d of [['render', 'chunks'], ['render', 'preview']]) {
+        const full = path.join(p.outDir || p.path, ...d); if (!exists(full)) continue;
         const s = await dirSize(full); if (s.size < 20 << 20) continue;
         add({ rule: 'chunks', preset: 'deep', project: p.id, projectName: p.name, path: full, size: s.size, dir: true, action: 'recycle', checked: !p.statusAuto,
           reason: `Render chunks of a finished film (status: ${p.status}${p.statusAuto ? ', automatic' : ''}). Partial re-rendering will no longer be possible.` });
@@ -277,10 +278,16 @@ function why(code) {
   return `Windows error code ${code}.`;
 }
 
-// to the Recycle Bin through SHFileOperation with no UI at all (FOF_NOERRORUI: a hidden error dialog used to be able
+// to the Recycle Bin (Windows) through SHFileOperation with no UI at all (FOF_NOERRORUI: a hidden error dialog used to be able
 // to hang the run), one PowerShell for the whole list, one result line per item as it goes. Items bigger than the
 // Bin of their drive are refused: Windows would delete those permanently without asking.
+// macOS: the Trash through Finder (so "Put Back" works), one item at a time, each result reported as it goes. Finder has no size
+// limit and nothing is ever deleted permanently; when Finder refuses (no Automation permission) the item is left untouched.
+async function recycleStreamMac(items, onItem) {
+  for (const it of items) { const r = await moveToTrashMac(it.path); if (r.ok) onItem(it, 0); else onItem(it, null, r.error); }
+}
 function recycleStream(items, onItem) {
+  if (IS_MAC) return recycleStreamMac(items, onItem);
   return new Promise(resolve => {
     if (!items.length) return resolve();
     const listFile = path.join(DATA_DIR, `recycle-${Date.now()}.json`);
@@ -339,9 +346,9 @@ foreach ($i in @($items)) {
 // old versions: copy (async, so the hub keeps answering), check, then remove the original
 async function archiveOne(i) {
   const root = config().archiveDir;
-  const rel = shortPath(i.path).replace(/^~\\/, '').replace(/^[A-Za-z]:\\/, '');
+  const rel = shortPath(i.path).replace(/^~[\\/]/, '').replace(/^[A-Za-z]:\\/, '').replace(/^\/+/, '');
   let dest = path.join(root, rel);
-  for (let k = 2; fs.existsSync(dest); k++) dest = path.join(root, rel.replace(/(\.[^.\\]+)?$/, m => `_${k}${m}`));   // keep the older archived copy
+  for (let k = 2; fs.existsSync(dest); k++) dest = path.join(root, rel.replace(/(\.[^.\\/]+)?$/, m => `_${k}${m}`));   // keep the older archived copy
   await fsp.mkdir(path.dirname(dest), { recursive: true });
   await fsp.copyFile(i.path, dest, fs.constants.COPYFILE_EXCL);
   const a = fs.statSync(i.path), b = fs.statSync(dest);

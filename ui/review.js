@@ -19,6 +19,7 @@ import { createTransport, createShuttle } from './review/transport.js';
 import { createApplyQueue } from './review/applyqueue.js';
 import { createLibrary } from './review/library.js';
 import { installTips } from './review/tips.js';
+import { FILES_APP } from './platform.js';
 
 const ICON = {
   cursor: '<path d="M5 3l13 7.5-5.5 1.5-2.5 5.5z"/>',
@@ -149,7 +150,7 @@ export async function reviewPage(page, id, relArg = '') {
   const changedBtn = h('button', { hidden: true, onclick: () => playChanged() }, 'Watch only the changes');
   const proxyPill = h('span', { class: 'pill', title: 'Lightweight review copy for smooth frame stepping' }, '…');
   const helpBtn = h('button', { class: 'ghost', title: 'How to use, all keyboard shortcuts (?)', onclick: () => toggleHelp() }, '❔ Help');
-  const folderBtn = h('button', { class: 'ghost', title: 'Open project folder in Explorer: ' + p.path, onclick: () => openFolder(id) }, '📂 Folder');
+  const folderBtn = h('button', { class: 'ghost', title: 'Open project folder in ' + FILES_APP + ': ' + p.path, onclick: () => openFolder(id) }, '📂 Folder');
   const liveRefreshBtn = liveMode ? h('button', { class: 'ghost', title: 'Find the current page again and reload the code', onclick: async () => {
     try { const fresh = await api('/api/project/' + id + '/live'); if (fresh.ok) liveSrc.reload(fresh); else toast(fresh.reason, true); }
     catch (e) { toast(e.message, true); }
@@ -237,7 +238,7 @@ export async function reviewPage(page, id, relArg = '') {
   const edit2d = liveSrc ? createEdit2d({ src: liveSrc, projectId: id, frame: frameA, ...edHost('2d', '🧩 2D'), range: () => rangeOk() ? rangeSec() : null, scenes: () => timeline.scenes(), time: () => liveSrc.displayedTime ?? 0, dur: () => dur(), history: { push: () => pushTag('2d'), undone: () => dropLastTag('2d') }, keysActive }) : null;
   if (edit2d) { top.insertBefore(pri(7, edit2d.el), thumbBtn); edit2d.el.classList.add('rv2-ed'); }
   // frame-by-frame automatic check in the open preview (no render, no tokens)
-  const scanner = liveSrc ? createAutoScan({ src: liveSrc, projectId: id, frame: frameA, ...edHost('scan', '🔍 Scan'), reloadNotes: () => notesPanel.reload() }) : null;
+  const scanner = liveSrc ? createAutoScan({ src: liveSrc, projectId: id, frame: frameA, ...edHost('scan', '🔍 Scan'), reloadNotes: () => notesPanel.reload(), onFixAll: () => notesPanel.send() }) : null;
   if (scanner) { top.insertBefore(pri(7, scanner.el), thumbBtn); scanner.el.classList.add('rv2-ed', 'rv2-ed-last'); }
   const capBar = h('div', { class: 'capbar', hidden: true });
   const frameB = h('div', { class: 'frame', hidden: true });
@@ -597,7 +598,7 @@ export async function reviewPage(page, id, relArg = '') {
       if (n.id === S.selected && !near && Math.abs(t - at) > 2) continue;
       const sh = numbered(n.drawing || [], n.id); paint(octx, sh, W, H, near ? 0.95 : 0.4);
       const b = sh.length ? bbox(sh) : [0.02, 0.04];
-      octx.font = `600 ${Math.max(13, W * 0.013)}px Segoe UI`; const txt = `#${n.id} ${n.text.slice(0, 42)}`, tw = octx.measureText(txt).width;
+      octx.font = `600 ${Math.max(13, W * 0.013)}px "Segoe UI", system-ui, sans-serif`; const txt = `#${n.id} ${n.text.slice(0, 42)}`, tw = octx.measureText(txt).width;
       const lh = Math.max(22, W * 0.02), onlyPin = sh.length && sh.every(x => x.type === 'pin'), pr = pinR(W);
       // a point note: label beside the marker head; anything else: above the drawing
       const x = Math.min(W - tw - 20, b[0] * W + (onlyPin ? pr * 1.4 : 0)), y = Math.max(4, onlyPin ? b[1] * H - pr * PIN_HEAD - lh / 2 : b[1] * H - 30);

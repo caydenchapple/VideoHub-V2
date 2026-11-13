@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { IS_WIN, IS_MAC, MAC_TOOL_DIRS, findBrowsers, pickBrowser } from './platform.js';
 
 export const HUB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // VIDEOHUB_DATA_DIR: npm test keeps its config, caches and queue out of the install's own data folder
@@ -20,7 +21,7 @@ export const DOCUMENTS = (() => {
   for (const d of [path.join(HOME, 'Documents'), path.join(HOME, 'OneDrive', 'Documents')]) if (fs.existsSync(d)) return d;
   return path.join(HOME, 'Documents');
 })();
-export const APPDATA = process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming');
+export const APPDATA = IS_MAC ? path.join(HOME, 'Library', 'Application Support') : process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming');
 export const TEMP = os.tmpdir();
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -28,13 +29,16 @@ export const idOf = p => crypto.createHash('sha1').update(path.resolve(p).toLowe
 export const norm = p => path.resolve(p).toLowerCase();
 // Folders that were moved can leave junctions at their old paths, so compare real paths (cached)
 const realCache = new Map();
-const realNorm = p => { const k = norm(p); let r = realCache.get(k); if (r === undefined) { try { r = fs.realpathSync.native(k).toLowerCase(); realCache.set(k, r); } catch { r = k; } } return r; };
+// a path that does not exist yet is resolved through its nearest existing parent (macOS: /var is a link to /private/var,
+// so a new folder inside os.tmpdir() must be compared by its real parent, like the existing folders are)
+const realOf = k => { try { return fs.realpathSync.native(k); } catch { const up = path.dirname(k); return up === k ? k : path.join(realOf(up), path.basename(k)); } };
+const realNorm = p => { const k = norm(p); let r = realCache.get(k); if (r === undefined) { r = realOf(k).toLowerCase(); realCache.set(k, r); } return r; };
 export const isInside = (child, parent) => { const c = realNorm(child), p = realNorm(parent); return c === p || c.startsWith(p.endsWith(path.sep) ? p : p + path.sep); };
 // does a command line or path refer to a path inside this install? Never by folder name: films live in Documents\VideoHub\films
 // and the install folder can have any name (a GitHub ZIP unpacks as VideoHub-main). Case-insensitive, both slash styles.
 const slashes = s => String(s || '').toLowerCase().replace(/[\\/]+/g, '/');
 export const refersToHub = (s, hub = HUB_DIR) => new RegExp(slashes(hub).replace(/\/$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:/|["\'\\s]|$)').test(slashes(s));
-export const shortPath = p => (isInside(p, DESKTOP) ? path.relative(DESKTOP, p) : isInside(p, HOME) ? '~\\' + path.relative(HOME, p) : p) || p;
+export const shortPath = p => (isInside(p, DESKTOP) ? path.relative(DESKTOP, p) : isInside(p, HOME) ? '~' + path.sep + path.relative(HOME, p) : p) || p;
 
 export function readJson(file, fallback = null) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); } catch { return fallback; }
@@ -72,12 +76,15 @@ function which(name, extra = []) {
   for (const d of dirs) { const f = path.join(d, name); if (d && fs.existsSync(f)) return f; }
   return null;
 }
+const BROWSERS = findBrowsers();
 export const TOOLS = {
-  ffmpeg: which('ffmpeg.exe', ['C:\\ffmpeg\\bin']) || 'ffmpeg',
-  ffprobe: which('ffprobe.exe', ['C:\\ffmpeg\\bin']) || 'ffprobe',
+  ffmpeg: which(IS_WIN ? 'ffmpeg.exe' : 'ffmpeg', IS_WIN ? ['C:\\ffmpeg\\bin'] : MAC_TOOL_DIRS) || 'ffmpeg',
+  ffprobe: which(IS_WIN ? 'ffprobe.exe' : 'ffprobe', IS_WIN ? ['C:\\ffmpeg\\bin'] : MAC_TOOL_DIRS) || 'ffprobe',
   node: process.execPath,
-  edge: ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'].find(f => fs.existsSync(f)) || null,
-  chrome: ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', path.join(HOME, 'AppData\\Local\\Google\\Chrome\\Application\\chrome.exe')].find(f => fs.existsSync(f)) || null,
+  edge: BROWSERS.edge,
+  chrome: BROWSERS.chrome,
+  brave: BROWSERS.brave,
+  browser: pickBrowser(BROWSERS),   // what the VideoHub window and renders use (Edge first on Windows, Chrome first on a Mac)
 };
 
 // ---------- ffprobe with a persistent cache (path + size + mtime)

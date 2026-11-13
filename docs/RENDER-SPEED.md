@@ -30,9 +30,9 @@ Everything VideoHub reads from the script is unchanged: `FPS`, `CH`, `VW`, `VH`,
 `rendered N frames in S s (F fps, encoder E)`.
 
 ## Choosing the encoder
-`VIDEOHUB_ENCODER` = `auto` | `nvenc` | `amf` | `qsv` | `x264` (default `auto`).
-- `auto` tries a tiny test encode with NVIDIA NVENC, then AMD AMF, then Intel Quick Sync, and uses the first that
-  works; otherwise x264 on the processor. A named encoder that does not work on the PC falls back to x264 (and says so).
+`VIDEOHUB_ENCODER` = `auto` | `nvenc` | `amf` | `qsv` | `videotoolbox` | `x264` (default `auto`).
+- `auto` tries a tiny test encode with NVIDIA NVENC, then AMD AMF, then Intel Quick Sync (on a Mac: Apple VideoToolbox
+  only), and uses the first that works; otherwise x264 on the processor. A named encoder that does not work on the PC falls back to x264 (and says so).
 - VideoHub passes the choice from setup / **Settings → Render speed** (`render.encoder` in `data\config.json`) to every
   render job, unless the job sets its own (the render dialog's *Encoder*). Scripts that ignore the variable are not
   affected. `GET /api/encoders` (and `node scripts\init-config.mjs --detect`) shows what this PC can use; the result is
@@ -44,6 +44,7 @@ Everything VideoHub reads from the script is unchanged: `FPS`, `CH`, `VW`, `VH`,
 | x264 | `-c:v libx264 -preset veryfast -crf 16` | unchanged from before |
 | AMF | `-c:v h264_amf -usage transcoding -quality quality -rc cqp -qp_i 14 -qp_p 16 -qp_b 18 -bf 3` (without `-bf 3` when the card rejects it) | **measured** (below) |
 | NVENC | `-c:v h264_nvenc -preset p7 -tune hq -rc vbr -cq 20 -b:v 0 -maxrate 250M -bufsize 500M -level 5.2 -spatial-aq 1 -temporal-aq 1 -rc-lookahead 32 -bf 3 -b_ref_mode middle` | **unverified here**: measured on another PC (VMAF 94.48 vs x264 medium crf 15 at 94.25, ~25 % smaller); without `-level 5.2` and a high maxrate NVENC hit a ~40 Mbit/s ceiling on grainy 1080p60 |
+| VideoToolbox (macOS) | `-c:v h264_videotoolbox -q:v 70 -allow_sw 0 -profile:v high` (second set: `-b:v 40M` for ffmpeg builds without `-q:v`) | **measured once** on an M1 Max: a 60-frame 1080p test pattern came out at 48.0 dB average PSNR against the x264 `-crf 16` encode of it (file sizes within 3 %); the example film renders through it end to end |
 | QSV | `-c:v h264_qsv -preset veryslow -global_quality 18 -look_ahead 1` | **unverified**: a starting point, never measured |
 
 The table lives in `server/encoders.js` and, because films copy the script, again in `render.js`; a test keeps the two
@@ -108,6 +109,8 @@ brightness only, came out ~0.4 lower on this soft synthetic clip. The difference
 reported as measured.
 
 ## Not verified
+- VideoToolbox: measured on one Apple Silicon Mac with one test pattern and the 3-second example film, not with VMAF on real
+  footage; Intel Macs were not available (they have a different VideoToolbox backend; `auto` falls back to x264 if the probe fails).
 - NVENC and Quick Sync: no such hardware on the test PC. Their arguments are a measurement from another PC (NVENC) and a
   proposal (QSV); `auto` falls back to x264 when their test encode fails.
 - Films with heavy 2D effects (large blurs/shadows): software 2D drawing could be slower than GPU drawing there; the

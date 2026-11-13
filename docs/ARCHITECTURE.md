@@ -4,11 +4,31 @@ A local Node 22 server (ES modules, no build step, two npm dependencies plus `pu
 a vanilla-JS UI served by it, an optional C# agent for render protection, and MCP tools for Claude.
 What film projects must look like is in [PROJECT-CONTRACT.md](PROJECT-CONTRACT.md).
 
+## Platforms (Windows and macOS)
+On a Mac the window is `VideoHub.app`, an Electron app (`electron/main.js`, built by `scripts/build-mac-app.mjs`): it starts `hub.js` with the
+system node when it is not running and shows its UI; the hub stays the same program and closes itself when idle. `hub.js` opens the
+app (`open -a`) when Claude calls `hub_live` with no window open; Windows keeps Edge's `--app` window.
+Everything that differs lives in `server/platform.js` (hub side) and `ui/platform.js` (wording): process trees and kill
+(`taskkill /T` vs a `ps` walk), free RAM (`os.freemem()` vs `vm_stat`, because macOS keeps "free" tiny on purpose), open
+in Explorer vs Finder (`open`, `open -R`), notifications (toast vs `osascript`), the folder dialog, the Recycle Bin vs the
+Trash through Finder, start at login (registry vs a LaunchAgent), browsers and tool folders (Homebrew's are added to `PATH`
+at start: apps launched from Finder or launchd get a bare one). Everything else asks `IS_WIN` / `IS_MAC` or these helpers;
+no other file calls `powershell`, `explorer`, `taskkill` or `cmd` without a platform branch. On macOS render protection is
+`nice 10` for the tree plus `taskpolicy -b/-B` for slow mode (no CPU-share limit: macOS has no processor affinity, and a
+nice value can only be raised again by root, so "normal speed" for a low-priority render keeps nice 10). Relative project
+paths are compared with `/` (scan.js turns Windows `\` into `/` first). Tests that need Windows rules pass them in
+(`path.win32`, an explicit probe order) so they mean the same on both.
+
+- **Focus** (macOS) — `server/focus.js`: the programs ticked on the Renders page are put in the background class (`taskpolicy -b -p <pid>`)
+  while a render runs (render protection's 3 s tick calls `focusTick`; new helper processes are picked up every 6 s) and back (`-B`) when
+  it ends, when Focus is switched off, at exit, or at the next start after a crash (ids in `data/focus-slowed.json`). The render's own
+  process tree, VideoHub, Claude, Terminal and system programs are never touched (`ramhogs.js` SKIP list, `choosePids`).
+
 ## Processes and lifetime
 - **Hub** — `server/hub.js`, HTTP on `127.0.0.1:7788` (UI + JSON API + server-sent events). It runs only while used:
   with no VideoHub window (SSE client), no queued/running job, no cleanup, no note pictures or review copies being made
   and no render seen by the agent for 2 minutes (`VIDEOHUB_IDLE_SEC`), it asks the agent to quit and exits — unless
-  "Start with Windows" is on (then it stays up). The `hub_*` tools start it again when needed.
+  "Start with Windows" (macOS: "at login", a LaunchAgent) is on (then it stays up). The `hub_*` tools start it again when needed.
 - **Render protection** — `server/guard.js`, inside the hub (no separate program since Nov 2026: the old C# agent,
   `guard/VideoHubAgent.exe`, was compiled on each PC and Windows Smart App Control blocked it as an unsigned app). The
   queue reports every process it starts (`guardTrack`); protection gives that process tree a CPU limit (processor
@@ -29,6 +49,7 @@ What film projects must look like is in [PROJECT-CONTRACT.md](PROJECT-CONTRACT.m
 | `scripts/init-config.mjs` | Setup's helper: what is decided already (`--state`), workspace checks, creating the workspace + README.txt and writing `config.json` (never overwriting a value), encoder detection (`--detect`), the example film (`--example`). `setup.ps1` only asks and passes the answers (`data/setup-answers.json` remembers them). |
 | `server/encoders.js` | Render encoders: which ones this PC can use (one tiny test encode each, cached in `data/encoders.json`; `GET /api/encoders`), their ffmpeg arguments (the template's `render.js` carries a copy, kept equal by a test), `VIDEOHUB_ENCODER` for jobs. See RENDER-SPEED.md. |
 | `server/legacy.js`, `ui/values.js` | Stored values (note/project/thumbnail statuses, note kinds) and the one place old Turkish values are mapped to English. |
+| `server/audioscan.js` + `ui/review/autoscan.js` | The review page's Scan panel: picture checks in the page (black/white/dark frames, flicker, pops, freezing, hard cuts, 3D QA), the sound on the server (one ffmpeg pass: silence in the middle, clipping, level, length vs picture), the scene list (`window.VH_SCENES`: gaps, overlaps). Findings are errors / warnings / info; the report keeps what you ignored and says how many findings were fixed or are new since the last scan of the same kind. **Fix all** makes one note per error and warning (no duplicates of open notes) and copies the message for Claude |
 | `server/scan.js` | Projects under the roots, video roles, duplicates, card thumbnails; root watchers so soft scans re-walk only changed projects. |
 | `server/source-revision.js` | A project's code revision (live covers; 409 on stale covers). |
 | `server/live.js` | Live preview: finds the page/fps/size/length/sound, serves `/live/<id>/…`, watches code → SSE `live-changed`. |

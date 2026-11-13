@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import path from 'node:path';
 import { ENCODERS, ENCODER_ARGS, PROBE_ORDER, pickEncoder, detectEncoders, encoderEnv } from './encoders.js';
+const WIN = ['nvenc', 'amf', 'qsv'];   // the Windows probe order, passed explicitly so the tests mean the same on every platform
 
 // the film render script carries its own copy of the table (films copy the script): both must say the same
 test('the render script template and its example copy use the same encoder arguments as the hub', () => {
@@ -19,26 +21,33 @@ test('the render script template and its example copy use the same encoder argum
 
 test('pickEncoder: auto takes the first GPU encoder whose probe works, else x264; a named one that fails falls back', async () => {
   const probe = ok => async n => ok.includes(n) ? ENCODER_ARGS[n].at(-1) : null;
-  assert.equal((await pickEncoder('auto', probe(['amf', 'qsv']))).name, 'amf');
-  assert.equal((await pickEncoder('auto', probe(['nvenc', 'amf']))).name, 'nvenc');
-  const none = await pickEncoder('auto', probe([])); assert.equal(none.name, 'x264'); assert.equal(none.why, null); assert.deepEqual(none.args, ENCODER_ARGS.x264[0]);
-  const want = await pickEncoder('nvenc', probe(['amf'])); assert.equal(want.name, 'x264'); assert.match(want.why, /nvenc is not available/);
+  assert.equal((await pickEncoder('auto', probe(['amf', 'qsv']), WIN)).name, 'amf');
+  assert.equal((await pickEncoder('auto', probe(['nvenc', 'amf']), WIN)).name, 'nvenc');
+  const none = await pickEncoder('auto', probe([]), WIN); assert.equal(none.name, 'x264'); assert.equal(none.why, null); assert.deepEqual(none.args, ENCODER_ARGS.x264[0]);
+  const want = await pickEncoder('nvenc', probe(['amf']), WIN); assert.equal(want.name, 'x264'); assert.match(want.why, /nvenc is not available/);
   assert.equal((await pickEncoder('amf', probe(['amf']))).args.at(1), 'h264_amf');
-  assert.equal((await pickEncoder('auto', async () => { throw new Error('ffmpeg missing'); })).name, 'x264');   // a probe that throws counts as "no"
-  assert.equal((await pickEncoder('warp9', probe(['qsv']))).name, 'qsv');   // unknown → auto
+  assert.equal((await pickEncoder('auto', async () => { throw new Error('ffmpeg missing'); }, WIN)).name, 'x264');   // a probe that throws counts as "no"
+  assert.equal((await pickEncoder('warp9', probe(['qsv']), WIN)).name, 'qsv');   // unknown → auto
   let probed = 0; assert.equal((await pickEncoder('x264', async () => { probed++; return []; })).name, 'x264'); assert.equal(probed, 0);
-  assert.deepEqual(PROBE_ORDER, ['nvenc', 'amf', 'qsv']); assert.deepEqual(ENCODERS, ['auto', 'nvenc', 'amf', 'qsv', 'x264']);
+  assert.deepEqual(PROBE_ORDER, process.platform === 'darwin' ? ['videotoolbox'] : ['nvenc', 'amf', 'qsv']); assert.deepEqual(ENCODERS, ['auto', 'nvenc', 'amf', 'qsv', 'videotoolbox', 'x264']);
+});
+
+test('macOS: auto takes VideoToolbox when its probe works, else x264', async () => {
+  const MAC = ['videotoolbox'], probe = ok => async n => ok.includes(n) ? ENCODER_ARGS[n][0] : null;
+  const vt = await pickEncoder('auto', probe(['videotoolbox']), MAC); assert.equal(vt.name, 'videotoolbox'); assert.equal(vt.args.at(1), 'h264_videotoolbox');
+  assert.equal((await pickEncoder('auto', probe([]), MAC)).name, 'x264');
+  assert.match((await pickEncoder('videotoolbox', probe([]), MAC)).why, /videotoolbox is not available/);
 });
 
 test('detectEncoders probes once and caches (memory and file, keyed by the ffmpeg binary)', async () => {
   const dir = new URL('../.test-tmp/encoders-cache/', import.meta.url); fs.mkdirSync(dir, { recursive: true });
-  const cacheFile = new URL('cache.json', dir).pathname.replace(/^\/(\w:)/, '$1'); try { fs.renameSync(cacheFile, cacheFile + '.' + Date.now()); } catch { }
+  const cacheFile = fileURLToPath(new URL('cache.json', dir)); try { fs.renameSync(cacheFile, cacheFile + '.' + Date.now()); } catch { }
   let calls = 0; const probe = async n => { calls++; return n === 'amf' ? ['x'] : null; }, gpus = async () => ['Some GPU'];
-  const a = await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe, gpus });
+  const a = await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe, gpus, order: WIN });
   assert.deepEqual(a.available, ['amf', 'x264']); assert.equal(a.best, 'amf'); assert.deepEqual(a.gpus, ['Some GPU']); assert.equal(calls, 3);
-  await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe, gpus }); assert.equal(calls, 3);
+  await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe, gpus, order: WIN }); assert.equal(calls, 3);
   assert.equal(JSON.parse(fs.readFileSync(cacheFile, 'utf8')).v.best, 'amf');
-  const b = await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe: async () => null, gpus, refresh: true }); assert.deepEqual(b.available, ['x264']);
+  const b = await detectEncoders({ ffmpeg: 'fake-ffmpeg-1', cacheFile, probe: async () => null, gpus, refresh: true, order: WIN }); assert.deepEqual(b.available, ['x264']);
 });
 
 test('render jobs get the configured encoder unless the job sets its own', () => {

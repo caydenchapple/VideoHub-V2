@@ -1,6 +1,6 @@
 # VideoHub: notes for Claude working on this repo
 
-Local Windows hub for videos written as code (catalog, live preview with no render, review notes, protected render
+Local hub (Windows and macOS) for videos written as code (catalog, live preview with no render, review notes, protected render
 queue, MCP tools). Node 22+, ES modules, no build step, vanilla-JS UI, optional C# agent. Architecture, map and the
 pitfalls behind past bugs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). What a film project must look like:
 [docs/PROJECT-CONTRACT.md](docs/PROJECT-CONTRACT.md).
@@ -42,6 +42,22 @@ them to type a command. Do not change VideoHub's code during an install and touc
    Claude Code session for the `hub_*` tools. Films are made in the workspace's `films` folder, never inside this
    VideoHub folder: for a first film they open the workspace (or any folder) in a new session and ask for a video.
 
+## Installing on a Mac (macOS)
+Same flow as above with these differences. Platform code lives in `server/platform.js` (process trees, free RAM, Finder
+`open`, notifications, the folder dialog, the Trash, the LaunchAgent) and `ui/platform.js` (wording).
+1. **Requirements.** `node -v` (22+), `ffmpeg -version`, Chrome/Edge/Brave in `/Applications`. Offer `brew install node`,
+   `brew install ffmpeg`, `brew install --cask google-chrome`; no Homebrew: https://brew.sh. A new terminal may be needed.
+2. **Look, change nothing.** `./setup.sh --dry-run`; `node scripts/init-config.mjs --state` / `--detect` as on Windows
+   (the encoder to look for is `videotoolbox`).
+3. **Ask** the same questions (workspace default `~/Documents/VideoHub`; "app" = the Electron app `~/Applications/VideoHub.app`, built by `scripts/build-mac-app.mjs` from `electron/` (a ~150 MB download);
+   "start at login" = a LaunchAgent, `~/Library/LaunchAgents/com.videohub.server.plist`).
+4. **Install once:** `./setup.sh --yes --workspace "<folder>" --watch-found yes|no --gpu-encoder yes|no --global-rule yes|no --shortcut yes|no --startup yes|no --example yes|no`
+5. **Check:** `node server/cli.js hub_workspace`; `./open.sh` opens the window; `node server/cli.js hub_project '{"project":"hello-film"}'`.
+Mac rules for development: test with the same `VIDEOHUB_*` test-hub variables; a sandboxed install test is
+`HOME=<scratch dir outside this folder> ./setup.sh --yes --workspace <scratch>/ws`. Uninstall: `./uninstall.sh`; update: `./update.sh`.
+Tests must mean the same on both platforms: pass Windows probe orders / `path.win32` explicitly (see `encoders.test.js`,
+`config.test.js`) instead of reading the host's.
+
 ## Setup on a new PC (what `SETUP.cmd` does)
 `SETUP.cmd` (or `powershell -ExecutionPolicy Bypass -File setup.ps1`; `-DryRun` asks nothing, assumes the recommended
 answers and changes nothing outside this folder; `-Yes` takes every recommended answer). It checks Node 22+, ffmpeg and
@@ -59,7 +75,7 @@ user; do not work around them. Uninstall: `uninstall.ps1` (`-DryRun` too).
   `tools.js` the `hub_*` tools (`mcp.js`, `cli.js`); `legacy.js` + `ui/values.js` stored values and legacy aliases;
   `config.js` settings and default folders (the workspace, `Documents\VideoHub\…` by default); `encoders.js` render
   encoders; `scripts/init-config.mjs` setup's config helper.
-- `ui/app.js` pages, `ui/review*` review editor, `ui/thumbstudio*` Thumbnail Studio.
+- `ui/app.js` pages, `ui/review*` review editor, `ui/thumbstudio*` Thumbnail Studio. Icons: write a label with its symbol ("📂 Folder", "🗑", "⏸") and `ui/icons.js` draws it as a line icon (add a character to its `MAP`/`SHAPES` for a new one); never draw the system's emoji picture.
 - `guard/` render protection agent; `engine-hooks/` page-side editor hooks; `examples/hello-film` the example film;
   `templates/new-film` the starter for new films; `templates/thumbnail` built-in thumbnail templates.
 

@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { IS_MAC, pickFolderMac } from './platform.js';
 
 const CS = `
 using System; using System.Runtime.InteropServices;
@@ -37,6 +38,7 @@ public static class VhPick {
 const q = (s) => "'" + String(s ?? '').replace(/'/g, "''") + "'";
 export function pickFolder(start, title = 'Choose folder') {
   if (process.env.VIDEOHUB_NO_WINDOW) return Promise.resolve(null);
+  if (IS_MAC) return pickFolderMac(start, title);   // the standard macOS folder dialog (osascript)
   const ps = [
     '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
     'Add-Type -AssemblyName System.Windows.Forms',

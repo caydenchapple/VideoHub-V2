@@ -1,0 +1,13 @@
+{
+  "name": "videohub-app",
+  "productName": "VideoHub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VideoHub as a macOS app: a native window around the local VideoHub server",
+  "main": "main.js",
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.3.1"
+  }
+}

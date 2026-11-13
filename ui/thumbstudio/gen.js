@@ -1,6 +1,7 @@
 // Variants UI: the variants strip under the canvas and the big variant viewer (compare two, lay the layout over it,
 // pin notes, "Send fixes to Claude", choose, delete). Images are made by Claude (hub_thumb_variant), never by VideoHub.
 import { h, api, toast, confirmBox, AGO } from '../app.js';
+import { BIN } from '../platform.js';
 
 const fileUrl = (pid, tid, f, v) => `/api/thumbstudio/${pid}/${tid}/file?f=${encodeURIComponent(f)}${v ? '&v=' + encodeURIComponent(v) : ''}`;
 const NOTE_TR = { 'open': 'open', claude: 'with Claude', 'fixed': 'fixed' };
@@ -114,7 +115,7 @@ export function openVariantViewer({ pid, tid, getBrief, vid, onChanged, onFix, o
             : h('div', { class: 'dim' }, 'Click the image and describe what should change. Then "Send fixes to Claude" asks Claude to change only those areas. (← → other variants)')),
         h('div', { class: 'row', style: { gap: '8px' } },
           h('button', { class: 'ghost danger', onclick: async () => {
-            if (!await confirmBox('Delete variant', h('div', {}, `${v.id} will be moved to the Recycle Bin.`), 'Delete')) return;
+            if (!await confirmBox('Delete variant', h('div', {}, `${v.id} will be moved to the ${BIN}.`), 'Delete')) return;
             try { await api(`/api/thumbstudio/${pid}/${tid}/variant/${v.id}/delete`, { method: 'POST' }); await onChanged(); const rest = getBrief().variants || []; if (!rest.length) close(); else { cur = rest[rest.length - 1].id; draw(); } }
             catch (e) { toast('Could not delete: ' + e.message, true); }
           } }, '🗑 Delete'),

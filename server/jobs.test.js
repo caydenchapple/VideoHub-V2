@@ -12,7 +12,7 @@ import { ENCODERS, LABELS, encoderEnv } from './encoders.js';
 const code = fs.readFileSync(new URL('./jobs.js', import.meta.url), 'utf8')
   .replace(/^import .+;\r?$/gm, '').replace(/\bexport /g, '');
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
-function harness() {
+function harness(win = true) {
   const base = path.resolve('.test-tmp', 'queue-fixture');
   const files = new Set(), children = [], timers = [], events = [], log = [];
   let pid = 100, workers = 1, maxParallel = 1, guard = { running: false }, encoder = 'auto';
@@ -29,6 +29,7 @@ function harness() {
       writeFileSync: file => files.add(file), appendFileSync() {}, copyFileSync: (a, b) => files.add(b),
       createWriteStream: () => ({ write: value => log.push(String(value)), end() {} }),
       promises: { copyFile: async (a, b) => files.add(b) } },
+    IS_WIN: win, IS_MAC: !win, killTree: pid => { spawn('taskkill', ['/PID', String(pid), '/T', '/F']); return true; },
     path, spawn, randomUUID, DATA_DIR: path.join(base, 'data'), TOOLS: { node: 'node', ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' },
     process: { env: {} }, setTimeout: fn => { timers.push(fn); return timers.length; },
     readJson: (file, fallback) => file.endsWith('project.json') ? { render: { workers } }
@@ -212,4 +213,12 @@ test('render scripts get the encoder from Settings as VIDEOHUB_ENCODER, unless t
   const h2 = harness(); h2.projects.get('p1').studio = null; h2.setEncoder('amf');
   await h2.create({ project: 'p1', mode: 'full', env: { VIDEOHUB_ENCODER: 'x264' } }); await flush();
   assert.equal(h2.children[0].opts.env.VIDEOHUB_ENCODER, 'x264');
+});
+
+test('macOS: command mode runs through /bin/sh -c and a cancel kills the whole process tree', async () => {
+  const h = harness(false), cmd = 'node render.js "a b" && echo done';
+  const held = await h.create({ project: 'p1', mode: 'command', cmd }); await flush();
+  assert.equal(h.approve(held.id), true); await flush();
+  const child = h.children[0]; assert.equal(child.cmd, '/bin/sh'); assert.deepEqual([...child.args], ['-c', cmd]); assert.notEqual(child.opts.windowsVerbatimArguments, true);
+  assert.equal(h.cancel(held.id), true);
 });

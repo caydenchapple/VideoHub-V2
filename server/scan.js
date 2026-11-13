@@ -14,14 +14,14 @@ const INDEX = path.join(DATA_DIR, 'index.json');
 
 // ---------- what a single file is
 function category(rel, name) {
-  const r = '\\' + rel.toLowerCase();
-  if (/\\render\\profiles\\|\\profiles\\w\d|\\chrome-profile/.test(r)) return 'profile';
-  if (/\\chunks_(prev|v\d)[^\\]*\\/.test(r)) return 'oldChunk';
-  if (/\\chunks\\/.test(r) || /^c_\d{3,}\.mp4$/i.test(name)) return 'chunk';
-  if (/\.tmp\.mp4$/i.test(name) || /\\render\\tmp\\|\\\.render\\/.test(r)) return 'part';
+  const r = '/' + rel.toLowerCase().replace(/\\/g, '/');   // one slash style (Windows paths use \\, macOS /)
+  if (/\/render\/profiles\/|\/profiles\/w\d|\/chrome-profile/.test(r)) return 'profile';
+  if (/\/chunks_(prev|v\d)[^/]*\//.test(r)) return 'oldChunk';
+  if (/\/chunks\//.test(r) || /^c_\d{3,}\.mp4$/i.test(name)) return 'chunk';
+  if (/\.tmp\.mp4$/i.test(name) || /\/render\/tmp\/|\/\.render\//.test(r)) return 'part';
   // make.mjs writes part.mp4; preview_silent / video_silent are the picture before the sound is laid on
   if (VIDEO.test(name) && /^(part\d*|seg_.+|(preview|video)_silent)\.(mp4|webm)$/i.test(name)) return 'part';
-  if (IMAGE.test(name) && /\\(snaps|qa|sheets?|shots|frames[^\\]*|contact)\\/.test(r)) return 'snap';
+  if (IMAGE.test(name) && /\/(snaps|qa|sheets?|shots|frames[^/]*|contact)\//.test(r)) return 'snap';
   if (VIDEO.test(name)) return 'output';
   if (AUDIO.test(name)) return 'audio';
   return 'other';
@@ -111,13 +111,13 @@ function roleOf(o) {
 // become the project's last video, the name of the next version or the sound source of a partial render.
 // A voiced file is a "clip" when it is under half the film's length, sits in a test folder or is named like one —
 // unless VideoHub registered it as a version (versions.json), which is always a film.
-const CLIP_DIRS = /\\(qa|lookdev|tests?|tmp|temp|debug|bench|clips?|scratch|previews?|probe)\\/i;
+const CLIP_DIRS = /\/(qa|lookdev|tests?|tmp|temp|debug|bench|clips?|scratch|previews?|probe)\//i;
 const CLIP_NAME = /(^|[_\-. ])(test|clip|qa|probe|bench|debug)([_\-. \d]|$)/i;
 function markClips(outs, filmDur, registered) {
   for (const o of outs) {
     if (!['final', 'web', 'preview'].includes(o.role) || registered.has(o.rel.toLowerCase())) continue;
     const short = filmDur >= 20 && (o.info.dur || 0) < filmDur * 0.5;
-    if (short || CLIP_DIRS.test('\\' + o.rel) || CLIP_NAME.test(o.name.replace(/\.[^.]+$/, ''))) o.role = 'clip';
+    if (short || CLIP_DIRS.test('/' + o.rel.replace(/\\/g, '/')) || CLIP_NAME.test(o.name.replace(/\.[^.]+$/, ''))) o.role = 'clip';
   }
 }
 // the newest film; files written within 2 min of each other (a copy, a touched file) go by version number

@@ -201,3 +201,23 @@ td.nowrap { white-space: nowrap; }
 .render-controls { white-space: normal !important; min-width: 170px; }
 .render-controls button { margin: 2px; padding: 5px 8px; font-size: 12px; }
 .current-render-settings { margin-bottom: 22px; }
+
+/* icons: the symbols in labels are drawn by ui/icons.js */
+.ico { display: inline-flex; align-items: center; justify-content: center; width: 1.15em; height: 1.15em; vertical-align: -0.2em; position: relative; flex: none; }
+.ico svg { width: 100%; height: 100%; display: block; }
+.ico-lead { margin-right: .45em; }
+.ico-t { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; user-select: none; }
+button .ico, .tab .ico, a .ico { opacity: .92; }
+button:hover .ico { opacity: 1; }
+button.primary .ico { opacity: 1; }
+.card .cardbtn .ico { width: 17px; height: 17px; }
+
+/* Focus panel (Renders page, macOS) */
+.focuspanel .focus-list { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: var(--r); margin: 6px 0; }
+.focuspanel .focus-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.focuspanel .focus-row:last-child { border-bottom: 0; }
+.focuspanel .focus-row:hover { background: var(--card2); }
+.focuspanel .focus-row.gone { opacity: .55; }
+.focuspanel .fname { flex: 1; }
+.focuspanel .fmeta { font-size: 12.5px; }
+.focuspanel .focus-status { font-size: 13px; }

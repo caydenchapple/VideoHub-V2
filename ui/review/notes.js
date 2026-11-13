@@ -216,5 +216,5 @@ export function createNotesPanel(ctx) {
   }
 
   const reload = () => ctx.reloadNotes();
-  return { el, render, renderDrafts, refreshOld, reload, openComposer, updateComposer, closeComposer, scrollTo, focusText: () => comp?.text.focus() };
+  return { el, render, renderDrafts, refreshOld, reload, send, openComposer, updateComposer, closeComposer, scrollTo, focusText: () => comp?.text.focus() };
 }

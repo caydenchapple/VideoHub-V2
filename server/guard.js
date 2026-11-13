@@ -1,4 +1,7 @@
-// VideoHub's render protection, built into the hub (plain Node + Windows' own PowerShell; no helper program).
+// VideoHub's render protection, built into the hub (plain Node + Windows' own PowerShell, or ps/taskpolicy on a Mac; no helper program).
+// macOS differences: there is no processor affinity (no CPU share limit; the CapActive/CapIdle settings are not used), priority is
+// 'nice' 10 for every render (a priority can only be lowered, never raised again, without admin rights) and slow mode is the
+// background class (`taskpolicy -b`, undone with `-B`). Free RAM is counted with vm_stat (server/platform.js), 'start at login' is a LaunchAgent.
 // Nov 2026: the old C# agent (guard\VideoHubAgent.exe, formerly RenderGuard.exe, compiled on each PC at install) is gone.
 // Windows Smart App Control blocks unsigned programs it has never seen, and its low-level calls (reading other
 // processes' memory, freezing processes, global hotkeys) looked like malware to antivirus tools.
@@ -15,6 +18,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { config } from './config.js';
 import { APPDATA, HUB_DIR, readJson, run, processAlive } from './util.js';
+import { focusTick, releaseFocus, keepAwake } from './focus.js';
+import { IS_MAC, descendants, killTree, availableMemMB, launchAgentFile, launchAgentPlist } from './platform.js';
 
 const RG = path.join(APPDATA, 'RenderGuard');   // settings.txt and the old agent's history.log (folder name kept)
 const MB = 1048576, CORES = os.cpus().length;
@@ -40,8 +45,8 @@ function current() {
 let S = current();
 export async function guardSettings() {
   const out = current();
-  const r = await run('reg', ['query', RUN_KEY, '/v', RUN_NAME]);
-  out.Startup = r.code === 0 && /open\.vbs/i.test(r.stdout);
+  if (IS_MAC) { try { out.Startup = fs.readFileSync(launchAgentFile(), 'utf8').includes(path.join(HUB_DIR, 'server', 'hub.js')); } catch { out.Startup = false; } }
+  else { const r = await run('reg', ['query', RUN_KEY, '/v', RUN_NAME]); out.Startup = r.code === 0 && /open\.vbs/i.test(r.stdout); }
   out.exe = null; out.builtIn = true;
   return out;
 }
@@ -49,12 +54,17 @@ export async function saveGuardSettings(patch) {
   const kv = readKv();
   for (const k of Object.keys(DEFAULTS)) if (patch[k] != null) kv[k] = String(typeof patch[k] === 'boolean' ? (patch[k] ? 1 : 0) : Math.round(+patch[k]));
   fs.mkdirSync(RG, { recursive: true });
-  fs.writeFileSync(SETTINGS, Object.entries(kv).map(([k, v]) => `${k}=${v}`).join('\r\n'));
-  if (patch.Startup != null) {
+  fs.writeFileSync(SETTINGS, Object.entries(kv).map(([k, v]) => `${k}=${v}`).join(IS_MAC ? '\n' : '\r\n'));
+  if (patch.Startup != null && IS_MAC) {
+    // a LaunchAgent: it starts the hub at the next login (not loaded now: this hub is already running)
+    const f = launchAgentFile();
+    if (patch.Startup) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, launchAgentPlist(HUB_DIR)); }
+    else { try { fs.unlinkSync(f); } catch { } }
+  } else if (patch.Startup != null) {
     if (patch.Startup) await run('reg', ['add', RUN_KEY, '/v', RUN_NAME, '/t', 'REG_SZ', '/d', startupCommand(), '/f']);
     else await run('reg', ['delete', RUN_KEY, '/v', RUN_NAME, '/f']);
   }
-  await run('reg', ['delete', RUN_KEY, '/v', RUN_LEGACY, '/f']);   // the old agent's autostart, if an old install left it
+  if (!IS_MAC) await run('reg', ['delete', RUN_KEY, '/v', RUN_LEGACY, '/f']);   // the old agent's autostart, if an old install left it
   guardCommand('reload');
   return guardSettings();
 }
@@ -66,6 +76,7 @@ const tracked = new Map();   // root pid -> { rootPid, start, cwd, project, what
 let timer = null, lastRamChange = 0, updated = null;
 export function guardTrack(pid, info = {}) {
   if (!pid) return;
+  keepAwake(pid);
   tracked.set(pid, { rootPid: pid, start: new Date().toISOString(), cwd: info.cwd || '', project: info.project || '', what: info.what || '', slow: null, applied: null, changedAt: 0 });
   if (timer) apply(tracked.get(pid)).catch(() => { });
 }
@@ -90,6 +101,7 @@ async function apply(r, force = false) {
   const w = wanted(r), key = w.prio + '/' + w.cores;
   if (!force && r.applied === key) return;
   r.applied = key;
+  if (IS_MAC) return applyMac(r, w);
   try { os.setPriority(r.rootPid, PRIO[w.prio]); } catch { }
   const aff = mask(w.cores);
   const script = [
@@ -100,11 +112,20 @@ async function apply(r, force = false) {
   await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script]);
 }
 
+// macOS: nice 10 for the whole tree (children started later inherit it); slow = background class, normal = back from it.
+// Only ever lowers a nice value (raising it again is root only), so "normal" for a LowPrio render stays at nice 10.
+function applyMac(r, w) {
+  const pids = [r.rootPid, ...descendants(r.rootPid)], bg = w.prio === 'Idle';
+  if (w.prio !== 'Normal') for (const p of pids) { try { if (os.getPriority(p) < 10) os.setPriority(p, 10); } catch { } }
+  return Promise.all(pids.map(p => run('taskpolicy', [bg ? '-b' : '-B', '-p', String(p)])));
+}
+
 // every 3 s while protection is on: forget renders that ended, slow down / restore for RAM
 function tick() {
   for (const [pid] of tracked) if (!processAlive(pid)) tracked.delete(pid);
-  const free = os.freemem() / MB, list = [...tracked.values()].sort((a, b) => a.start.localeCompare(b.start));
+  const free = availableMemMB(), list = [...tracked.values()].sort((a, b) => a.start.localeCompare(b.start));
   updated = new Date().toISOString();
+  focusTick(list.length > 0, list.map(r => r.rootPid)).catch(() => { });
   if (!list.length || Date.now() - lastRamChange < 20e3) return;   // one change at a time, then 20 s to settle (no ping-pong)
   const ram = list.filter(r => r.slow === 'RAM'), normal = list.filter(r => !r.slow);
   let pick = null, slow = null;
@@ -119,10 +140,10 @@ function tick() {
 // live state (same shape the old agent wrote to state.json)
 export function guardState() {
   if (!timer) return { running: false, reason: 'render protection is off' };
-  const free = os.freemem() / MB;
+  const free = availableMemMB();
   return {
     running: true, builtIn: true, updated: updated || new Date().toISOString(), age: 0,
-    ramAvailMB: Math.round(free), ramTotalMB: Math.round(os.totalmem() / MB), cpu: null, capNow: S.CapActive, hotkeys: false,
+    ramAvailMB: Math.round(free), ramTotalMB: Math.round(os.totalmem() / MB), cpu: null, capNow: IS_MAC ? 100 : S.CapActive, hotkeys: false,
     pauseMB: S.PauseMB, criticalMB: S.CriticalMB, slowCapPct: S.SlowCapPct,
     renders: [...tracked.values()].map(r => ({ rootPid: r.rootPid, start: r.start, project: r.project, cwd: r.cwd, cmd: '', what: r.what, slow: r.slow, paused: false, cpu: null, ramMB: null })),
     settings: { ...S },
@@ -134,7 +155,7 @@ export function guardCommand(action, rootPid) {
   const pick = rootPid ? [tracked.get(+rootPid)].filter(Boolean) : [...tracked.values()];
   let note = null;
   if (action === 'reload') { S = current(); for (const r of tracked.values()) apply(r).catch(() => { }); return { ok: true, note }; }
-  if (action === 'kill') { for (const r of pick) run('taskkill', ['/PID', String(r.rootPid), '/T', '/F']); return { ok: true, note }; }
+  if (action === 'kill') { for (const r of pick) killTree(r.rootPid); return { ok: true, note }; }
   if (/^(pause|pauseAll|slow)$/.test(action)) { if (action !== 'slow') note = 'Pausing is no longer available: the render was slowed down to the minimum instead.'; for (const r of pick) { r.slow = 'manual'; apply(r).catch(() => { }); } }
   else if (/^(resume|resumeAll|normal)$/.test(action)) for (const r of pick) { r.slow = null; apply(r).catch(() => { }); }
   else return { ok: false, note: 'unknown command' };
@@ -152,7 +173,7 @@ export async function ensureGuard() {
 }
 export async function quitGuard() {
   if (!timer) return true;
-  clearInterval(timer); timer = null;
+  clearInterval(timer); timer = null; await releaseFocus().catch(() => { });
   await Promise.all([...tracked.values()].map(r => apply(r, true).catch(() => { })));
   return true;
 }
@@ -190,3 +211,6 @@ export function snippRenders() {
   }
   return out.sort((a, b) => b.updated - a.updated).slice(0, 50);
 }
+
+// Focus panel buttons: apply a change at once instead of at the next 3 s tick
+export const focusNow = () => focusTick(tracked.size > 0, [...tracked.keys()], true);

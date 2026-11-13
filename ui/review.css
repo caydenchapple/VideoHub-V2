@@ -85,12 +85,12 @@
 .app.app-editor:not(.side-peek) > .side .nav a::before { font-size: 17px; line-height: 1; }
 .app.app-editor:not(.side-peek) > .side .nav .count { position: absolute; top: 1px; right: 0; font-size: 9.5px; padding: 0 4px; margin: 0; line-height: 14px; }
 .app.app-editor:not(.side-peek) > .side .live { display: none; }
-.app.app-editor .nav a[data-nav=projects]::before { content: '🎬'; }
-.app.app-editor .nav a[data-nav=renders]::before { content: '⏳'; }
-.app.app-editor .nav a[data-nav=outputs]::before { content: '🆕'; }
-.app.app-editor .nav a[data-nav=thumbstudio]::before { content: '🖼'; }
-.app.app-editor .nav a[data-nav=disk]::before { content: '💾'; }
-.app.app-editor .nav a[data-nav=settings]::before { content: '⚙'; }
+.app.app-editor .nav a[data-nav=projects]::before { content: ''; }
+.app.app-editor .nav a[data-nav=renders]::before { content: ''; }
+.app.app-editor .nav a[data-nav=outputs]::before { content: ''; }
+.app.app-editor .nav a[data-nav=thumbstudio]::before { content: ''; }
+.app.app-editor .nav a[data-nav=disk]::before { content: ''; }
+.app.app-editor .nav a[data-nav=settings]::before { content: ''; }
 .app.app-editor.side-peek > .side { position: fixed; left: 0; top: 0; bottom: 0; width: 210px; z-index: 80; box-shadow: 8px 0 30px rgba(0,0,0,.5); }
 
 .rv2-view { position: relative; overflow: hidden; background: #0a0a0c; border-radius: 10px; }
@@ -428,3 +428,15 @@
 .tl2-ms { width: 26px; height: 24px; font-size: 12px; border-radius: 6px; }
 .tl2-lvl { height: 24px; line-height: 22px; border-radius: 6px; }
 .tl2-hname { font-size: 12px; }
+
+/* auto scan: severity chips, ignored items, Fix all */
+.ascan-chip { padding: 2px 9px; border-radius: 999px; background: transparent; font-size: 12px; }
+.ascan-chip.on { background: rgba(255,255,255,.12); border-color: var(--border2); }
+.ascan-item.off { opacity: .5; }
+.ascan-x { padding: 1px 6px; opacity: .6; }
+.ascan-item:hover .ascan-x { opacity: 1; }
+/* the panel sits in the side pane too: its rows must shrink and wrap there instead of running out of it */
+.ascan-panel { grid-template-columns: minmax(0, 1fr); }
+.ascan-panel > * { min-width: 0; }
+.ascan-hint, .ascan-sum { overflow-wrap: anywhere; }
+.ascan-strip { max-width: 100%; }

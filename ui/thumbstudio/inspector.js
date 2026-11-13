@@ -2,6 +2,7 @@
 import { h } from '../app.js';
 import { checkFramingConsistency } from './camera.js';
 import { CAMERA_SHOTS, CAMERA_ANGLES, LENSES, LIGHT_KEYS, LIGHT_TIMES, STYLE_PRESETS, MOODS, TEXT_PRESETS } from './catalog.js';
+import { IS_MAC, OS_NAME } from '../platform.js';
 
 export function renderInspector(container, brief, selectedLayerId, { onLayerChange, onBriefChange, onDuplicate, onDelete }) {
   container.innerHTML = '';
@@ -283,13 +284,13 @@ function renderLayerInspector(container, layer, brief, { onLayerChange, onDuplic
       }
     }, h('option', { value: '' }, 'Apply preset…'), TEXT_PRESETS.map(p => h('option', { value: p.id }, p.name)));
     form.append(field('Text Preset', presetSel));
-    const fonts = ['Impact', 'Arial Black', 'Segoe UI', 'Bahnschrift', 'Georgia', 'Cambria', 'Consolas'];
+    const fonts = IS_MAC ? ['Impact', 'Arial Black', 'Helvetica Neue', 'Avenir Next', 'Georgia', 'Baskerville', 'Menlo'] : ['Impact', 'Arial Black', 'Segoe UI', 'Bahnschrift', 'Georgia', 'Cambria', 'Consolas'];
     const family = TEXT_PRESETS.find(p => p.id === layer.font)?.font || layer.font || 'Impact';
     const fontSel = h('select', {
       disabled: isLocked,
       onchange: e => { onLayerChange({ font: e.target.value }); e.target.blur(); }
     }, fonts.map(f => h('option', { value: f, selected: family === f, style: { fontFamily: f } }, f)));
-    form.append(field('Font (Built-in Windows Fonts)', fontSel));
+    form.append(field(`Font (Built-in ${OS_NAME} Fonts)`, fontSel));
     form.append(field('Alignment', h('select', { disabled: isLocked, onchange: e => { onLayerChange({ align: e.target.value }); e.target.blur(); } },
       [['left', 'Left'], ['center', 'Center'], ['right', 'Right']].map(([v, t]) => h('option', { value: v, selected: (layer.align || 'center') === v }, t)))));
 

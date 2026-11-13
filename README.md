@@ -8,7 +8,10 @@ you are happy do you render — once, in a queue that keeps your PC usable, and 
 changed. It is for people who make explainers, shorts and animations with Claude Code and are tired of rendering a
 whole film to check one fix.
 
-> **Windows 10/11 only.** VideoHub uses Windows APIs (Job Objects, the Recycle Bin, Explorer, Edge) and PowerShell.
+> **Windows 10/11 and macOS.** This fork adds a native macOS port of the original Windows-only VideoHub: the same hub, review
+> editor and queue, with Finder, the Trash, Notification Center, `launchd` and Apple's VideoToolbox encoder in place of
+> Explorer, the Recycle Bin, toasts, the start-up registry key and NVENC/AMF/QSV. See [Mac](#mac-macos-12-or-newer) below.
+> The Windows scripts (`SETUP.cmd`, `setup.ps1` …) are unchanged and still work.
 
 ![Live preview with a note on a frame](docs/screenshots/review-live-preview.png)
 
@@ -19,6 +22,11 @@ whole film to check one fix.
   scenes and narration on a timeline. Changing the code reloads the open preview in place.
 - **Review notes** — click or draw on any frame (or pick a frame range), type what is wrong. **Send to Claude** copies
   a short message; Claude reads the notes (time, frame, chunk, a close-up picture of your drawing) with `hub_notes`.
+- **Auto scan** — no render, no tokens: checks a live film frame by frame (black, white and very dark frames, flicker,
+  one-frame pops, freezing, hard cuts, the 3D engine's camera and character checks), its sound (silence in the middle,
+  clipping, a level far too quiet or loud, a length that does not match the picture) and its scene list (gaps, overlaps).
+  Findings are sorted into errors, warnings and info, you can ignore the ones that are on purpose, and the next scan says
+  how many are fixed or new. **Fix all** makes one note per error and warning and copies the message for Claude: one paste.
 - **Check fixes** — a tour through the notes Claude marked fixed, with before/after; "Still there" sends one back.
 - **Render queue** — one render at a time on the PC, waits for renders started elsewhere, progress and ETA, a
   render dialog with size/fps/workers/encoder, a copy to any folder, a Windows notification when it is done.
@@ -60,6 +68,7 @@ VideoHub works the same; renders just run unprotected.
 ![Renders](docs/screenshots/renders.png)
 
 ## Requirements
+Windows 10/11 or macOS 12+ (Apple Silicon or Intel).
 - Windows 10 or 11
 - [Node.js 22+](https://nodejs.org) — `winget install -e --id OpenJS.NodeJS.LTS`
 - ffmpeg on PATH — `winget install -e --id Gyan.FFmpeg`
@@ -68,6 +77,36 @@ VideoHub works the same; renders just run unprotected.
 - [Claude Code](https://claude.com/claude-code) — for the Claude side
 - Optional: the .NET Framework 4 C# compiler (ships with Windows) for the render protection agent
 - Optional: a graphics card with a video encoder (most NVIDIA, AMD and Intel ones) for faster renders
+
+### Mac (macOS 12 or newer)
+- [Node.js 22+](https://nodejs.org) and ffmpeg through [Homebrew](https://brew.sh): `brew install node ffmpeg`
+- Google Chrome, Microsoft Edge, Brave or Chromium: `brew install --cask google-chrome`. Renders draw every frame in one of them invisibly; the VideoHub window itself is the Electron app, not a browser window
+- [Claude Code](https://claude.com/claude-code), for the Claude side
+- Nothing else: macOS' own VideoToolbox does the hardware video encoding (Apple Silicon and Intel Macs)
+
+Install: `git clone https://github.com/caydenchapple/Videohub.git VideoHub`, then double-click **`SETUP.command`** (or run
+`./setup.sh` in Terminal; the first time, right-click → Open if macOS asks about an unidentified developer). It asks the
+same plain questions as the Windows setup, builds **VideoHub.app** in `~/Applications` (an Electron app: a native window around the hub with its own Dock icon;
+Launchpad and Spotlight find it; a one-time ~150 MB Electron download) and can start VideoHub at login (a LaunchAgent). Every option is also a flag: `./setup.sh --yes --workspace ~/Movies/VideoHub --startup no`;
+`./setup.sh --dry-run` prints every step and changes nothing. Open VideoHub from Launchpad/Spotlight, or with `OPEN.command` / `./open.sh`
+(they open the app, or your browser when it is not built). Rebuild the app alone with `node scripts/build-mac-app.mjs`. The app finds the hub
+through `Contents/Resources/app/hub.json`: do not move the VideoHub folder after setup (run setup again if you do). Update with `./update.sh` (or `git pull` + `./setup.sh`), uninstall with `./uninstall.sh` (`--dry-run` first).
+
+What is different on a Mac:
+- **Render protection** — renders run at low priority (`nice 10`, passed on to Chrome and ffmpeg); in RAM slow mode they
+  move to the background class (`taskpolicy -b`). macOS has no processor-affinity API, so there is no "% of the cores"
+  limit and the CPU sliders are hidden. Free RAM is counted the way Activity Monitor does (free + inactive + purgeable).
+- **Render speed** — *Automatic* uses VideoToolbox (`h264_videotoolbox`, quality 70, about the same PSNR as x264 -crf 16
+  on a test clip) and falls back to x264.
+- **Focus** — on the Renders page, tick the programs (browsers, chat, music, anything big) to slow down while a render runs. They
+  keep running in the background class (`taskpolicy -b`: lowest CPU, disk and network priority), nothing is closed, and they
+  go back to normal speed when the render ends, when you switch it off or when VideoHub quits (also after a crash). *Slow them
+  now* does it without a render; *Keep the Mac awake* holds off sleep while a render runs (`caffeinate`). Not available on Windows.
+- **Cleanup** — deleted files go to the **Trash** through Finder (so *Put Back* works). The first time, macOS asks whether
+  VideoHub may control Finder (System Settings → Privacy & Security → Automation).
+- **Windows, folders, notifications** — the folder picker, "Open folder" (Finder), the "render finished" notification
+  and the app window (Chrome `--app=`) use the native macOS ones. macOS may ask once for access to Documents / Desktop.
+- **Files** — `~/Documents/VideoHub` is the default workspace; paths in settings and tools use `/`.
 
 ## Install
 ### The easy way: let Claude Code install it
@@ -131,7 +170,8 @@ projects, so **never expose port 7788** (no port forwarding, no tunnels, no `0.0
 inside your watched folders, the archive and its own folders.
 
 ## Uninstall
-Run `powershell -ExecutionPolicy Bypass -File uninstall.ps1` (`-DryRun` first to see what it would do). It stops this
+On a Mac run `./uninstall.sh` (`--dry-run` first); it removes the same things (MCP server, skill, rule block, the Desktop icon and the login item).
+On Windows run `powershell -ExecutionPolicy Bypass -File uninstall.ps1` (`-DryRun` first to see what it would do). It stops this
 install's server and agent, removes the MCP server, the skill and the rule block it added (only if they belong to this
 install), the Desktop shortcut and the start-up entry. Your films, their notes, the outputs folder and this folder stay;
 delete them yourself if you want.
@@ -140,7 +180,7 @@ delete them yourself if you want.
 - **The page is blank** — open it in a browser and look at the console; a missing Node 22 or a broken update are the
   usual causes. Restart with the Desktop shortcut.
 - **Claude does not see `hub_*` tools** — start a new Claude Code session; `claude mcp list` should show `videohub`.
-  Run SETUP.cmd again if not.
+  Run SETUP.cmd (SETUP.command on a Mac) again if not.
 - **"This folder is not a project VideoHub knows"** — put the film inside a watched folder or add its parent folder
   in Settings → Watched folders.
 - **"The live preview could not open"** — the page lacks `window.renderOut(t)` / `window.READY`; see
@@ -149,7 +189,7 @@ delete them yourself if you want.
   `hub_project({set:{render:{env:{DUR:"…"}}}})`.
 - **Renders fail at once** — ffmpeg or Edge/Chrome missing (Settings → Tools), or `puppeteer-core` missing for a
   film's render script (VideoHub ships one; run `npm install` in VideoHub's folder).
-- **Port 7788 is taken** — set `"port"` in `data\config.json`.
+- **Port 7788 is taken** — set `"port"` in `data/config.json` (`data\config.json` on Windows).
 - **Coming from an older (Turkish) build** — see [docs/MIGRATING.md](docs/MIGRATING.md).
 
 ## Development

@@ -16,7 +16,7 @@
 //   pixels are read straight from the canvas, handed to a Web Worker and sent to this script over a local WebSocket;
 //   ffmpeg gets raw RGBA (lossless, no JPEG). Any other page is captured as PNG screenshots (also lossless).
 //   VIDEOHUB_TRANSPORT=png forces screenshots (the WebSocket server is built in: no package needed). Every frame is a pure function of t, so workers can render in parallel.
-// - Encoder: VIDEOHUB_ENCODER = auto | nvenc | amf | qsv | x264 (auto: the first graphics-card encoder whose test
+// - Encoder: VIDEOHUB_ENCODER = auto | nvenc | amf | qsv | videotoolbox | x264 (auto: the first graphics-card encoder whose test
 //   encode works, else x264). A named encoder that does not work here falls back to x264.
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os');
@@ -35,15 +35,19 @@ function loadPuppeteer() {
   console.error('puppeteer-core not found: run "npm install" in this folder (or render through VideoHub, which ships it).');
   process.exit(2);
 }
-// the browser: CHROME env, else Edge, else Chrome
+// the browser: CHROME env, else Edge, else Chrome (Windows); Chrome, Edge, Brave, Chromium (macOS)
+const MAC = process.platform === 'darwin';
 function browserPath() {
-  const c = [process.env.CHROME,
+  const app = (n, x = n) => [`/Applications/${n}.app/Contents/MacOS/${x}`, path.join(os.homedir(), 'Applications', `${n}.app`, 'Contents', 'MacOS', x)];
+  const c = [process.env.CHROME, ...(MAC ? [...app('Google Chrome'), ...app('Microsoft Edge'), ...app('Brave Browser'), ...app('Chromium')] : [
     'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-    'C:/Program Files/Google/Chrome/Application/chrome.exe', path.join(os.homedir(), 'AppData/Local/Google/Chrome/Application/chrome.exe')].filter(Boolean);
+    'C:/Program Files/Google/Chrome/Application/chrome.exe', path.join(os.homedir(), 'AppData/Local/Google/Chrome/Application/chrome.exe')])].filter(Boolean);
   const f = c.find(x => fs.existsSync(x));
   if (!f) { console.error('No Edge or Chrome found (set CHROME to a Chromium browser).'); process.exit(2); }
   return f;
 }
+// a render started outside VideoHub (a Terminal) may not have Homebrew on its PATH
+if (MAC) for (const d of ['/opt/homebrew/bin', '/usr/local/bin']) if (!(process.env.PATH || '').split(path.delimiter).includes(d) && fs.existsSync(d)) process.env.PATH += path.delimiter + d;
 const FFMPEG = process.env.FFMPEG || 'ffmpeg';
 
 const PREVIEW = process.env.PREVIEW === '1';
@@ -59,6 +63,8 @@ const ENCODER_ARGS = {
     ['-c:v', 'h264_amf', '-usage', 'transcoding', '-quality', 'quality', '-rc', 'cqp', '-qp_i', '14', '-qp_p', '16', '-qp_b', '18']],
   qsv: [['-c:v', 'h264_qsv', '-preset', 'veryslow', '-global_quality', '18', '-look_ahead', '1']],
   x264: [['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16']],
+  // Apple VideoToolbox (Macs): -q:v 70 measured at ~48 dB PSNR against x264 -crf 16; the second set is for ffmpeg builds without -q:v
+  videotoolbox: [['-c:v', 'h264_videotoolbox', '-q:v', '70', '-allow_sw', '0', '-profile:v', 'high'], ['-c:v', 'h264_videotoolbox', '-b:v', '40M', '-allow_sw', '0', '-profile:v', 'high']],
   lossless: [['-c:v', 'libx264rgb', '-preset', 'ultrafast', '-qp', '0']],   // for checks only (huge files)
 };
 const probe = args => spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=gray:s=640x360:r=30', '-frames:v', '5', '-pix_fmt', 'yuv420p', ...args, '-f', 'null', '-'], { stdio: 'ignore', timeout: 20000, windowsHide: true }).status === 0;
@@ -66,7 +72,7 @@ function pickEncoder() {
   const want = String(process.env.VIDEOHUB_ENCODER || 'auto').toLowerCase();
   const works = n => (ENCODER_ARGS[n] || []).find(probe) || null;
   if (want === 'x264' || want === 'lossless') return { name: want, args: ENCODER_ARGS[want][0] };
-  for (const n of want === 'auto' ? ['nvenc', 'amf', 'qsv'] : [want]) { const a = works(n); if (a) return { name: n, args: a }; }
+  for (const n of want === 'auto' ? (MAC ? ['videotoolbox'] : ['nvenc', 'amf', 'qsv']) : [want]) { const a = works(n); if (a) return { name: n, args: a }; }
   if (want !== 'auto') console.log(`encoder ${want} does not work on this PC: using x264`);
   return { name: 'x264', args: ENCODER_ARGS.x264[0] };
 }

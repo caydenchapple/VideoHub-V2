@@ -1,4 +1,4 @@
-// Setup's helper for data/config.json: setup.ps1 asks the questions, this file decides and writes (so the logic lives
+// Setup's helper for data/config.json: setup.ps1 (Windows) or setup.sh (macOS) asks the questions, this file decides and writes (so the logic lives
 // next to server/config.js and is unit-tested in scripts/init-config.test.js). It never moves or deletes a folder,
 // never overwrites a value an existing config.json has and never replaces a config it cannot read.
 //
@@ -11,13 +11,15 @@
 //   --data <folder>  another data folder than <VideoHub>\data (tests)
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { IS_WIN } from '../server/platform.js';
 import { DEFAULTS, DEFAULT_BASE, WORKSPACE_FOLDERS, discoverRoots } from '../server/config.js';
 import { ENCODERS, detectEncoders } from '../server/encoders.js';
 
 export const HUB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const low = p => path.resolve(p).toLowerCase();
-const inside = (c, p) => low(c) === low(p) || low(c).startsWith(low(p).replace(/\\$/, '') + '\\');
+const inside = (c, p) => low(c) === low(p) || low(c).startsWith(low(p).replace(/[\\/]$/, '') + path.sep);
 
 export const README = `This is your VideoHub workspace: everything VideoHub makes lives here.
 
@@ -30,15 +32,19 @@ archive      old versions moved here by Disk cleanup instead of being deleted
 VideoHub never deletes anything here by itself. Settings > Folders shows and changes each folder.
 `;
 
+const expand = p => (!IS_WIN && typeof p === 'string' && /^~(\/|$)/.test(p.trim()) ? path.join(os.homedir(), p.trim().slice(1)) : p);
+
 // null when the folder can be the workspace, else why not (plain words for setup)
 export function checkWorkspace(p, hubDir = HUB) {
-  if (typeof p !== 'string' || !p.trim()) return 'Type a folder, for example D:\\Videos\\VideoHub.';
+  const example = IS_WIN ? 'D:\\Videos\\VideoHub' : '~/Movies/VideoHub';
+  if (typeof p !== 'string' || !p.trim()) return 'Type a folder, for example ' + example + '.';
   p = p.trim().replace(/^"(.*)"$/, '$1');
-  if (!/^([a-zA-Z]:[\\/]|\\\\[^\\]+\\[^\\]+)/.test(p)) return 'Type a full path that starts with a drive letter, for example D:\\Videos\\VideoHub.';
+  p = expand(p);   // ~/Movies/VideoHub
+  if (IS_WIN ? !/^([a-zA-Z]:[\\/]|\\\\[^\\]+\\[^\\]+)/.test(p) : !p.startsWith('/')) return IS_WIN ? 'Type a full path that starts with a drive letter, for example D:\\Videos\\VideoHub.' : 'Type a full path that starts with / (or ~/), for example ~/Movies/VideoHub.';
   const r = path.resolve(p);
-  if (path.parse(r).root.toLowerCase() === (r.endsWith('\\') ? r : r + '\\').toLowerCase()) return 'Pick a folder, not a whole drive (for example ' + r.replace(/\\?$/, '\\') + 'VideoHub).';
+  if (IS_WIN ? path.parse(r).root.toLowerCase() === (r.endsWith('\\') ? r : r + '\\').toLowerCase() : r === '/' || r.startsWith('/Volumes/') && r.split('/').filter(Boolean).length < 2) return IS_WIN ? 'Pick a folder, not a whole drive (for example ' + r.replace(/\\?$/, '\\') + 'VideoHub).' : 'Pick a folder, not the whole disk (for example ~/Movies/VideoHub).';
   if (inside(r, hubDir)) return 'Pick a folder outside the VideoHub program folder (updates replace that folder).';
-  let a = r; while (!fs.existsSync(a)) { const up = path.dirname(a); if (up === a) return 'The drive ' + path.parse(r).root + ' does not exist on this PC.'; a = up; }
+  let a = r; while (!fs.existsSync(a)) { const up = path.dirname(a); if (up === a) return (IS_WIN ? 'The drive ' + path.parse(r).root : 'The disk of ' + r) + ' does not exist on this computer.'; a = up; }
   try { if (!fs.statSync(a).isDirectory()) return a === r ? 'That is a file, not a folder.' : a + ' is a file, not a folder.'; } catch { return 'That folder cannot be read.'; }
   return null;
 }
@@ -73,10 +79,11 @@ export function initConfig({ dataDir = path.join(HUB, 'data'), hubDir = HUB, wor
     if (!cfg.render || typeof cfg.render !== 'object' || !cfg.render.encoder) { cfg.render = { ...(cfg.render || {}), encoder: encoder || 'auto' }; changed = true; W(`set the render encoder to ${cfg.render.encoder}`); }
     else actions.push(`kept the render encoder ${cfg.render.encoder}`);
     const roots = Array.isArray(cfg.roots) ? cfg.roots : [];
+    watch = watch.map(expand);
     const add = watch.filter(w => w && !roots.some(r => r && typeof r.path === 'string' && low(r.path) === low(w)));
     if (add.length) { cfg.roots = [...roots, ...add.map(w => ({ path: path.resolve(w), type: 'container', enabled: true }))]; changed = true; for (const w of add) W(`watch ${w}`); }
   } else {
-    ws = path.resolve(workspace || DEFAULT_BASE());
+    ws = path.resolve(expand(workspace) || DEFAULT_BASE());
     const why = checkWorkspace(ws, hubDir); if (why) throw new Error(why);
     let found = []; try { found = discover(); } catch { }
     found = found.filter(r => !inside(r.path, ws));
@@ -97,7 +104,7 @@ export function initConfig({ dataDir = path.join(HUB, 'data'), hubDir = HUB, wor
   if (changed) W(`write ${file}`);
   if (!dryRun) {
     for (const d of dirs) fs.mkdirSync(d, { recursive: true });
-    if (wantReadme) fs.writeFileSync(readme, README.replace(/\n/g, '\r\n'), { flag: 'wx' });
+    if (wantReadme) fs.writeFileSync(readme, IS_WIN ? README.replace(/\n/g, '\r\n') : README, { flag: 'wx' });
     if (changed) { fs.mkdirSync(dataDir, { recursive: true }); const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(cfg, null, 1)); fs.renameSync(tmp, file); }
   }
   return { file, existed: !!saved, workspace: ws, encoder: cfg.render.encoder, roots: cfg.roots, wrote: changed && !dryRun, dryRun, actions };

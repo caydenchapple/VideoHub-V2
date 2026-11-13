@@ -9,6 +9,7 @@
 // The folder is outside every scan root and the scan skips it, so it is never a project or a duplicate.
 // Every video goes into a folder per day, <outputs>\2026-11-08\…;
 // videos left in the top folder by older versions are moved into their day's folder once (tidy, on the first sync).
+import { openCommand } from './platform.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -127,7 +128,7 @@ export function routes(route) {
   route('GET', '/api/ciktilar', () => stats());
   route('POST', '/api/ciktilar/open', () => {
     const dir = outputsDir(); fs.mkdirSync(dir, { recursive: true });
-    if (!process.env.VIDEOHUB_NO_WINDOW) spawn('explorer.exe', [dir], { detached: true, stdio: 'ignore' }).unref();
+    if (!process.env.VIDEOHUB_NO_WINDOW) { const o = openCommand(dir); spawn(o.command, o.args, { detached: true, stdio: 'ignore', windowsVerbatimArguments: !!o.verbatim }).on('error', () => { }).unref(); }
     return { ok: true, dir };
   });
 }

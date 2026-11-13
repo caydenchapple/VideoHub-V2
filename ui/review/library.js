@@ -2,6 +2,7 @@
 // and the user's sound folder (config.soundLibDir, default Documents\VideoHub\sounds). Search, ▶ listen (one at a time), "+" adds at the playhead,
 // and every row can be dragged onto the timeline (application/x-vh-sound; timeline.js decides time, row and lane).
 import { h, api, toast } from '../app.js';
+import { FILES_APP } from '../platform.js';
 
 const MAX_ROWS = 300;
 
@@ -17,7 +18,7 @@ export function createLibrary({ onAdd, onFile }) {
   el.append(h('div', { class: 'mx-head' }, h('b', { class: 'mx-title' }, '📚 Sound library'), tabs),
     h('div', { class: 'tl2-lrow' }, search, h('button', { class: 'ghost', title: 'Choose one or more sound files from your computer to add at the playhead', onclick: () => onFile?.() }, '📁 Add from file…')),
     list,
-    h('div', { class: 'dim lib-hint' }, 'Drag a sound onto the timeline or click + to add it at the playhead. You can also drag sound files from Explorer.'));
+    h('div', { class: 'dim lib-hint' }, 'Drag a sound onto the timeline or click + to add it at the playhead. You can also drag sound files from ' + FILES_APP + '.'));
 
   function stop() { player.pause(); playing = null; }
   function listen(x) {

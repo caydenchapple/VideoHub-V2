@@ -4,10 +4,11 @@
 // encoders.test.js checks that the two stay the same. Measurements and what is unverified: docs/RENDER-SPEED.md.
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
+import { IS_MAC } from './platform.js';
 
-export const ENCODERS = ['auto', 'nvenc', 'amf', 'qsv', 'x264'];
-export const PROBE_ORDER = ['nvenc', 'amf', 'qsv'];   // auto: the first that works, else x264
-export const LABELS = { auto: 'Automatic (graphics card if it can, else processor)', nvenc: 'NVIDIA graphics card (NVENC)', amf: 'AMD graphics card (AMF)', qsv: 'Intel graphics (Quick Sync)', x264: 'Processor (x264)' };
+export const ENCODERS = ['auto', 'nvenc', 'amf', 'qsv', 'videotoolbox', 'x264'];
+export const PROBE_ORDER = IS_MAC ? ['videotoolbox'] : ['nvenc', 'amf', 'qsv'];   // auto: the first that works, else x264
+export const LABELS = { auto: 'Automatic (graphics card if it can, else processor)', nvenc: 'NVIDIA graphics card (NVENC)', amf: 'AMD graphics card (AMF)', qsv: 'Intel graphics (Quick Sync)', videotoolbox: 'Apple VideoToolbox (Mac hardware encoder)', x264: 'Processor (x264)' };
 // Candidate argument sets per encoder, best first (the probe keeps the first one the card accepts). Same picture
 // quality as x264 or better, measured against a lossless reference: see docs/RENDER-SPEED.md.
 export const ENCODER_ARGS = {
@@ -20,16 +21,19 @@ export const ENCODER_ARGS = {
   // unverified (no Intel GPU was available): global quality 18 with look-ahead
   qsv: [['-c:v', 'h264_qsv', '-preset', 'veryslow', '-global_quality', '18', '-look_ahead', '1']],
   x264: [['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16']],
+  // Apple's VideoToolbox (Apple Silicon and Intel Macs): -q:v 70 measured at ~48 dB PSNR against x264 -crf 16 on a 1080p test pattern;
+  // the second set is for ffmpeg builds without -q:v support (a plain 40 Mbit/s target)
+  videotoolbox: [['-c:v', 'h264_videotoolbox', '-q:v', '70', '-allow_sw', '0', '-profile:v', 'high'], ['-c:v', 'h264_videotoolbox', '-b:v', '40M', '-allow_sw', '0', '-profile:v', 'high']],
 };
 
 // what to use: a named encoder if its probe passes, auto → the first GPU encoder that passes, otherwise x264.
 // probe(name) → the working argument list or null. Never throws; `why` says when a wish could not be met.
-export async function pickEncoder(want, probe) {
+export async function pickEncoder(want, probe, order = PROBE_ORDER) {
   want = ENCODERS.includes(want) ? want : 'auto';
   const tryOne = async n => { try { return await probe(n); } catch { return null; } };
   if (want === 'x264') return { name: 'x264', args: ENCODER_ARGS.x264[0], why: null };
   if (want !== 'auto') { const a = await tryOne(want); return a ? { name: want, args: a, why: null } : { name: 'x264', args: ENCODER_ARGS.x264[0], why: `${want} is not available on this PC: using x264` }; }
-  for (const n of PROBE_ORDER) { const a = await tryOne(n); if (a) return { name: n, args: a, why: null }; }
+  for (const n of order) { const a = await tryOne(n); if (a) return { name: n, args: a, why: null }; }
   return { name: 'x264', args: ENCODER_ARGS.x264[0], why: null };
 }
 
@@ -48,8 +52,15 @@ export function probeWith(ffmpeg = 'ffmpeg') {
   });
 }
 
-// the graphics cards Windows reports (names only; virtual display adapters left out)
+// the graphics cards Windows (Get-CimInstance) or macOS (system_profiler) reports (names only; virtual display adapters left out)
 export function gpuNames() {
+  if (IS_MAC) return new Promise(resolve => {
+    let out = '', c;
+    try { c = spawn('system_profiler', ['SPDisplaysDataType', '-json']); } catch { return resolve([]); }
+    const t = setTimeout(() => { try { c.kill(); } catch { } resolve([]); }, 15000);
+    c.stdout.on('data', d => out += d); c.on('error', () => { clearTimeout(t); resolve([]); });
+    c.on('close', () => { clearTimeout(t); try { resolve((JSON.parse(out).SPDisplaysDataType || []).map(g => g.sppci_model || g._name).filter(Boolean)); } catch { resolve([]); } });
+  });
   return new Promise(resolve => {
     let out = '', c;
     try { c = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '(Get-CimInstance Win32_VideoController).Name'], { windowsHide: true }); } catch { return resolve([]); }
@@ -62,12 +73,12 @@ export function gpuNames() {
 // What this PC can use: { available: ['amf', 'x264'], best: 'amf', gpus: [...], at }. Cached in memory and in
 // cacheFile, keyed by the ffmpeg binary (path, size, date): a new ffmpeg or driver probe again with refresh.
 let mem = null;
-export async function detectEncoders({ ffmpeg = 'ffmpeg', cacheFile = null, refresh = false, probe = null, gpus = gpuNames } = {}) {
+export async function detectEncoders({ ffmpeg = 'ffmpeg', cacheFile = null, refresh = false, probe = null, gpus = gpuNames, order = PROBE_ORDER } = {}) {
   let key = ffmpeg; try { const s = fs.statSync(ffmpeg); key += '|' + s.size + '|' + s.mtimeMs; } catch { }
   if (!refresh && mem?.key === key) return mem.v;
   if (!refresh && cacheFile) { try { const c = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); if (c.key === key && Array.isArray(c.v?.available)) { mem = c; return c.v; } } catch { } }
   const pr = probe || probeWith(ffmpeg), available = [];
-  for (const n of PROBE_ORDER) if (await pr(n).catch(() => null)) available.push(n);
+  for (const n of order) if (await pr(n).catch(() => null)) available.push(n);
   available.push('x264');
   const v = { available, best: available[0], gpus: await gpus().catch(() => []), at: new Date().toISOString() };
   mem = { key, v };

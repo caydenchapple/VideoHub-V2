@@ -10,14 +10,15 @@ const file = path.join(dir, 'İstanbul (son & %100).mp4');
 fs.writeFileSync(file, 'test fixture');
 test.after(() => { fs.unlinkSync(file); fs.rmdirSync(dir); });
 
-test('filenames are passed to Explorer without a command shell', () => {
+const MAC = process.platform === 'darwin';
+test('filenames are passed to Explorer (Windows) or `open` (macOS) without a command shell', () => {
   const p = openPlan(file);
-  assert.equal(p.command, 'explorer.exe');
-  assert.deepEqual(p.args, ['"' + path.resolve(file) + '"']);
+  assert.equal(p.command, MAC ? 'open' : 'explorer.exe');
+  assert.deepEqual(p.args, [MAC ? path.resolve(file) : '"' + path.resolve(file) + '"']);
   assert.equal(p.select, false);
 });
 test('folder action selects the exact video, not just its parent', () => {
-  assert.deepEqual(openPlan(file, 'folder').args, ['/select,"' + path.resolve(file) + '"']);
+  assert.deepEqual(openPlan(file, 'folder').args, MAC ? ['-R', path.resolve(file)] : ['/select,"' + path.resolve(file) + '"']);
   assert.equal(openPlan(file, 'folder').select, true);
   assert.equal(openPlan(dir, 'folder').select, false);
 });

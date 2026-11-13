@@ -12,6 +12,7 @@ import { index, project } from './scan.js';
 import * as jobs from './jobs.js';
 import { guardHistory } from './guard.js';
 import { vhDir } from './notes.js';
+import { IS_MAC, notifyMac } from './platform.js';
 import { DATA_DIR, DESKTOP, HOME, readJson, writeJson, refersToHub } from './util.js';
 // RenderGuard writes a render's folder shortened (relative to the Desktop, or ~\ for the home folder): back to a full path
 const guardPath = s => !s ? '' : s.startsWith('~') ? path.join(HOME, s.slice(1)) : path.isAbsolute(s) ? s : path.join(DESKTOP, s);
@@ -105,9 +106,10 @@ export function outputs(limit = 150) {
 export function markSeen(key) { const s = seenMap() || (seen = {}); if (key) s[key.includes(':') && !/^[a-z]:\\/i.test(key) ? key : keyOf(key)] = new Date().toISOString(); saveSeen(); }
 export function markAllSeen() { const s = seenMap() || (seen = {}); for (const it of collect()) if (it.exists) s[it.key] = s[it.key] || new Date().toISOString(); saveSeen(); }
 
-// a Windows notification (the hub's PC): render finished or failed. Nothing on test hubs.
-export function notifyWindows(title, body) {
+// a desktop notification (Windows toast or macOS Notification Center on the hub's computer): render finished or failed. Nothing on test hubs.
+export function notifyDesktop(title, body) {
   if (process.env.VIDEOHUB_NO_WINDOW) return;
+  if (IS_MAC) return notifyMac(title, body);
   const q = (s) => "'" + String(s || '').replace(/'/g, "''").slice(0, 200) + "'";
   const ps = [
     '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
@@ -123,3 +125,4 @@ export function routes(route, readBody) {
   route('GET', '/api/outputs', (req, url) => outputs(Math.min(1000, +(url.searchParams.get('limit') || 150))));
   route('POST', '/api/outputs/seen', async (req) => { const b = await readBody(req); if (b.all) markAllSeen(); else markSeen(b.key || b.path); return { ok: true, unseen: outputs(1).unseen }; });
 }
+export const notifyWindows = notifyDesktop;   // old name
