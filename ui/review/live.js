@@ -4,11 +4,13 @@
 // While playing, the project's audio is the clock; frames that take too long are skipped, never slowed down.
 import { h } from '../app.js';
 
-export function createLiveSource(info, { onStatus } = {}) {
+// cache (ui/review/framecache.js, optional): saved pictures of a heavy film that playback shows instead of drawing it live
+export function createLiveSource(info, { onStatus, cache = null } = {}) {
   const box = h('div', { class: 'livebox' });
   let waitTimer = 0, iframe = null, win = null, ready = false, t = 0, paused = true, rate = 1, seeking = false;
   let displayedTime = 0, destroyed = false, loadVersion = 0, seekVersion = 0, seekTimer = 0, playTimer = 0;
   let wantPlay = false;   // play asked for while the page was loading: start once it is ready
+  let overlayOn = false;   // the picture on screen is a saved one from the cache, not the film page's own
   let base = { t: 0, at: 0 }, raf = 0, need = false, rvfc = [], frames = 0, fpsAt = performance.now(), drawMs = 0, scale = 1;
   const audio = info.audio ? h('audio', { src: info.audio, preload: 'auto' }) : null;
   const src = new EventTarget();
@@ -25,6 +27,7 @@ export function createLiveSource(info, { onStatus } = {}) {
     if (destroyed) return;
     const version = ++loadVersion;
     clearTimeout(playTimer); playTimer = 0; rvfc = [];
+    cache?.reset(); overlayOn = false;   // new code: the saved pictures are out of date
     ready = false; status({ state: 'loading' });
     const f = h('iframe', { class: 'live', src: `${info.url}${info.url.includes('?') ? '&' : '?'}vh=${Date.now()}`, scrolling: 'no', tabindex: '-1' });
     f.style.width = info.w + 'px'; f.style.height = info.h + 'px'; f.style.transform = `scale(${scale})`;
@@ -38,7 +41,7 @@ export function createLiveSource(info, { onStatus } = {}) {
       const err = win && win.__vhError;
       if (err) { clearInterval(wait); status({ state: 'error', error: err }); return; }
       if (win && win.READY === true && typeof win.renderOut === 'function') {
-        clearInterval(wait); ready = true; status({ state: 'ready', ms: Math.round(performance.now() - t0) });
+        clearInterval(wait); ready = true; status({ state: 'ready', ms: Math.round(performance.now() - t0) }); cache?.attach(cacheApi);
         if (wantPlay) playTimer = setTimeout(() => { playTimer = 0; if (!destroyed && version === loadVersion && wantPlay) play(); }, 50);
         // the page may know its own timing and size better (the 3D studio sets window.__config)
         let c = win.__config || win.VH_CONFIG;
@@ -70,6 +73,7 @@ export function createLiveSource(info, { onStatus } = {}) {
 
   function draw() {
     if (!ready || destroyed) return;
+    if (overlayOn) { cache?.hide(); overlayOn = false; }
     const a = performance.now();
     const at = t;
     try { win.renderOut(at); displayedTime = at; } catch (e) { status({ state: 'error', error: e.message }); return; }
@@ -103,11 +107,13 @@ export function createLiveSource(info, { onStatus } = {}) {
     raf = requestAnimationFrame(loop);
     if (!paused) {
       t = Math.min(info.dur, clock()); syncAudio();
-      present(); if (frames % 6 === 0) fire('timeupdate');
+      // a heavy film: the saved picture for this moment when there is one (never during a seek: that must draw the exact frame)
+      if (cache && !seeking && !need && cache.paint(t)) { frames++; displayedTime = t; overlayOn = true; } else present();
+      if (frames % 6 === 0) fire('timeupdate');
       if (t >= info.dur - 1e-3) { pause(); fire('ended'); }
     } else if (need) { present(); }
     const now = performance.now();
-    if (now - fpsAt > 1000) { status({ state: paused ? 'paused' : 'playing', fps: Math.round(frames * 1000 / (now - fpsAt)), drawMs: Math.round(drawMs) }); frames = 0; fpsAt = now; }
+    if (now - fpsAt > 1000) { const fps = Math.round(frames * 1000 / (now - fpsAt)); status({ state: paused ? 'paused' : 'playing', fps, drawMs: Math.round(drawMs) }); if (!paused && cache) cache.observe(fps, overlayOn); frames = 0; fpsAt = now; }
   }
   raf = requestAnimationFrame(loop);
 
@@ -117,7 +123,7 @@ export function createLiveSource(info, { onStatus } = {}) {
     if (!paused) return Promise.resolve();   // HTMLVideoElement.play() is idempotent; never rewind to the last rendered frame.
     wantPlay = false;
     if (t >= info.dur - 1e-3) t = 0;
-    paused = false; base = { t, at: performance.now() };
+    paused = false; base = { t, at: performance.now() }; cache?.playing(true);
     if (audio) { try { audio.currentTime = t; audio.playbackRate = rate; } catch { } audio.play().catch(() => { }); }
     fire('play'); return Promise.resolve();
   }
@@ -132,9 +138,9 @@ export function createLiveSource(info, { onStatus } = {}) {
     at = clampTime(at);
     if (paused && !wantPlay && !seeking && !need && t === at && displayedTime === at) return;
     const wasPlaying = !paused || wantPlay; wantPlay = false;
-    t = at; paused = true; base = { t, at: performance.now() }; clearSeek();
+    t = at; paused = true; base = { t, at: performance.now() }; clearSeek(); cache?.playing(false);
     audio?.pause(); if (audio) try { audio.currentTime = t; } catch { }
-    if (displayedTime !== t) draw();
+    if (displayedTime !== t || overlayOn) draw();   // after a saved picture the page itself must show the exact frame
     if (wasPlaying) fire('pause');
     fire('timeupdate');
   }
@@ -166,6 +172,13 @@ export function createLiveSource(info, { onStatus } = {}) {
     finally { try { win.renderOut(keep); } catch (e) { status({ state: 'error', error: e.message }); } }
   }
   const capture = (at, width) => snap(at, width)?.toDataURL('image/jpeg', 0.9) || null;
+  // what the frame cache needs from this player (framecache.js): draw a moment and copy it, or put the shown moment back
+  const cacheApi = {
+    info, box, iframe: () => iframe, busy: () => !ready || destroyed || seeking || need,
+    now: () => paused ? t : Math.min(info.dur, clock()),
+    grab: (at, width) => { win.renderOut(clampTime(at)); return copyPicture(width); },
+    restore: () => { try { win.renderOut(displayedTime); } catch { } },
+  };
 
   Object.defineProperties(src, {
     displayedTime: { get: () => displayedTime },
@@ -194,7 +207,7 @@ export function createLiveSource(info, { onStatus } = {}) {
     muted: { get: () => audio ? audio.muted : true, set: v => { if (audio) audio.muted = v; } },
   });
   Object.assign(src, {
-    el: box, isLive: true, info, play, pause, pauseAt, capture, snap, snapDisplayed,
+    el: box, isLive: true, info, cache, play, pause, pauseAt, capture, snap, snapDisplayed,
     requestVideoFrameCallback: cb => { if (destroyed) return 0; rvfc.push(cb); return rvfc.length; },
     // the film's sound file was rebuilt (scene editor sound levels): load it again, same moment
     // a fresh mix after a sound build; while playing it carries on from the clock (a new src pauses the element)

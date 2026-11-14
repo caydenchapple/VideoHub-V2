@@ -58,6 +58,7 @@ const SHAPES = {
   layers: '<path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
   play: '<path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.8l-12-7.5A1 1 0 0 0 7 4.5Z"/>',
   playLeft: '<path d="M17 4.5v15a1 1 0 0 1-1.5.9l-12-7.5a1 1 0 0 1 0-1.8l12-7.5A1 1 0 0 1 17 4.5Z"/>',
+  bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9Z"/>',
   target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
@@ -70,7 +71,7 @@ const MAP = {
   '⏮': 'back', '⏭': 'forward', '📌': 'pin', '🔤': 'type', '🅣': 'type', '➜': 'right', '⬆': 'up', '⬇': 'down', '👁': 'eye', '🙈': 'eyeOff',
   '🧍': 'user', '📚': 'library', '🎧': 'headphones', '🎬': 'film', '🎥': 'video', '📦': 'box', '✂': 'scissors', '➕': 'plus', '📷': 'camera',
   '⛶': 'maximize', '⚠': 'alert', '📐': 'layout', '🔒': 'lock', '🔓': 'unlock', '🔧': 'wrench', '☀': 'sun', '🆕': 'sparkles', '⚙': 'gear',
-  '🎯': 'target', '⏳': 'hourglass', '⏸': 'pause', '💬': 'message', '❌': 'xcircle', '🐢': 'slow', '🧩': 'layers', '▶': 'play', '◀': 'playLeft', '✓': 'check', '✕': 'x', '✗': 'x',
+  '🎯': 'target', '⚡': 'bolt', '⏳': 'hourglass', '⏸': 'pause', '💬': 'message', '❌': 'xcircle', '🐢': 'slow', '🧩': 'layers', '▶': 'play', '◀': 'playLeft', '✓': 'check', '✕': 'x', '✗': 'x',
 };
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const CHARS = Object.keys(MAP).map(esc).join('|');

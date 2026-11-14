@@ -5,6 +5,7 @@ import { COLORS, WIDTHS, paint, bbox, hit, pinR, PIN_HEAD } from './review/shape
 import { createTimeline } from './review/timeline.js';
 import { createNotesPanel } from './review/notes.js';
 import { createLiveSource } from './review/live.js';
+import { createFrameCache } from './review/framecache.js';
 import { createLiveCover } from './review/cover.js';
 import { createSceneEditor } from './review/sceneedit.js';
 import { createMixer } from './review/mixer.js';
@@ -171,9 +172,20 @@ export async function reviewPage(page, id, relArg = '') {
   const pri = (n, el) => { if (el) el.dataset.pri = n; return el; };
   pri(9, menuBtn); pri(9, backA); pri(9, fileSel); pri(9, renderBtn?.el); pri(9, helpBtn);
   pri(6, liveRefreshBtn); pri(5, cmpSel); pri(5, modeSeg); pri(4, changedBtn); pri(3, thumbBtn);
-  pri(2, folderBtn); pri(2, infoBtn); pri(2, fileBtn); pri(1, proxyPill);
+  const smoothBtn = h('button', { class: 'ghost', hidden: !liveMode, onclick: () => { frameCache?.setMode(!frameCache.mode); paintSmooth(); paintLivePill(); toast(frameCache.mode ? 'Smooth playback on: heavy films are saved in the background' : 'Smooth playback off'); } }, '⚡ Smooth');
+  function paintSmooth() {
+    if (!frameCache) return;
+    const c = cacheInfo, on = frameCache.mode;
+    smoothBtn.classList.toggle('on', on);
+    smoothBtn.title = !on ? 'Smooth playback is off. On: a film too heavy to draw live is drawn once in the background (while you are not using the preview) and then played from saved pictures at full speed.'
+      : !c || c.state === 'idle' || c.state === 'checking' ? 'Smooth playback is on: checking how fast this film draws…'
+      : c.state === 'light' ? 'Smooth playback is on: this film draws fast enough live, nothing needs saving.'
+      : c.state === 'building' ? `Saving pictures of the film for smooth playback: ${c.pct}% (it works while you are not using the preview). Click to turn off.`
+      : `Smooth playback is on: the film is saved (${Math.round(c.bytes / 1048576)} MB${c.state === 'partial' ? ', the rest is drawn live' : ''}). Click to turn off.`;
+  }
+  pri(2, folderBtn); pri(2, infoBtn); pri(2, fileBtn); pri(1, proxyPill); pri(4, smoothBtn);
   const edLabel = pri(3, h('span', { class: 'rv2-glabel', hidden: !liveMode }, 'Edit'));
-  const top = h('div', { class: 'rv2-top' }, menuBtn, backA, fileSel, cmpSel, modeSeg, changedBtn, h('span', { class: 'spacer' }), edLabel, thumbBtn, liveRefreshBtn, folderBtn, infoBtn, fileBtn, proxyPill, helpBtn, moreBtn, renderBtn?.el);
+  const top = h('div', { class: 'rv2-top' }, menuBtn, backA, fileSel, cmpSel, modeSeg, changedBtn, h('span', { class: 'spacer' }), edLabel, thumbBtn, liveRefreshBtn, smoothBtn, folderBtn, infoBtn, fileBtn, proxyPill, helpBtn, moreBtn, renderBtn?.el);
 
   // tools
   const toolBtns = {};
@@ -213,7 +225,10 @@ export async function reviewPage(page, id, relArg = '') {
   }
 
   // stage
-  const liveSrc = liveMode ? createLiveSource(liveInfo, { onStatus: st => liveStatus(st) }) : null;
+  // Smooth playback (review/framecache.js): a heavy film is drawn once in the background, then played from saved pictures
+  let cacheInfo = null, lastLive = null;
+  const frameCache = liveMode ? createFrameCache({ onChange: ci => { cacheInfo = ci; paintSmooth(); paintLivePill(); } }) : null;
+  const liveSrc = liveMode ? createLiveSource(liveInfo, { onStatus: st => liveStatus(st), cache: frameCache }) : null;
   const liveCover = liveSrc ? createLiveCover({ source: liveSrc, save: data => api(`/api/project/${id}/live-thumb`, { method: 'POST', body: data }) }) : null;
   const videoA = liveSrc || h('video', { src: '/media?p=' + encodeURIComponent(cur.path), preload: 'auto', playsinline: true });
   const videoB = h('video', { preload: 'auto', muted: true, playsinline: true, class: 'vb', hidden: true });
@@ -812,10 +827,16 @@ export async function reviewPage(page, id, relArg = '') {
   }
   function liveStatus(st) {
     if (st.state === 'ready') setTimeout(() => loadScenes(true), 0);
+    if (st.state === 'error') toast('Preview page error: ' + st.error, true);
+    lastLive = st; paintLivePill();
+  }
+  function paintLivePill() {
+    const st = lastLive; if (!st || !liveMode) return;   // (liveSrc itself does not exist yet when the first status arrives)
     proxyPill.title = 'Live preview: the film is drawn from its code, with no render. Reloads automatically when the code changes · click to reload now';
+    const c = cacheInfo, extra = !c || !c.mode ? '' : c.state === 'building' ? ` · saving ${c.pct}%` : c.state === 'checking' ? ' · checking speed' : (c.state === 'ready' || c.state === 'partial') ? ' · smooth' : '';
     if (st.state === 'loading') { proxyPill.className = 'pill inceleme'; proxyPill.textContent = 'live · loading…'; }
-    else if (st.state === 'error') { proxyPill.className = 'pill hâlâ-var'; proxyPill.textContent = 'live · error'; toast('Preview page error: ' + st.error, true); }
-    else { proxyPill.className = 'pill approved'; proxyPill.textContent = st.fps != null && st.state === 'playing' ? `live · ${st.fps} fps` : 'live · ready'; }
+    else if (st.state === 'error') { proxyPill.className = 'pill hâlâ-var'; proxyPill.textContent = 'live · error'; }
+    else { proxyPill.className = 'pill approved'; proxyPill.textContent = (st.fps != null && st.state === 'playing' ? `live · ${st.fps} fps` : 'live · ready') + extra; }
   }
   // ---------- narration text: timeline row + captions under the video
   api(`/api/project/${id}/transcript`).then(tr => { if (!tr?.ok) return; trData = tr; timeline.setTranscript(tr); transport.update(shownT()); updCaptions(); }).catch(() => { });

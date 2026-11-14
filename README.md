@@ -20,6 +20,11 @@ whole film to check one fix.
   films that have no video yet.
 - **Live preview, no render** — plays a film from its page (`window.renderOut(t)`), frame-accurate, with its sound,
   scenes and narration on a timeline. Changing the code reloads the open preview in place.
+- **Smooth playback** — a heavy film (3D, post effects) can need 100 ms or more per frame, so drawing it live crawls however
+  fast the computer is. VideoHub times the film once; if it cannot draw at full speed it draws every frame once in the
+  background (only while you are not using the preview, nearest the playhead first), keeps them as small pictures and plays
+  from those at the screen's full speed. The pill says *saving 40%* then *smooth*; paused frames, notes and captures always
+  use the film's own exact frame; a code change drops the pictures. The ⚡ Smooth button turns it off.
 - **Review notes** — click or draw on any frame (or pick a frame range), type what is wrong. **Send to Claude** copies
   a short message; Claude reads the notes (time, frame, chunk, a close-up picture of your drawing) with `hub_notes`.
 - **Auto scan** — no render, no tokens: checks a live film frame by frame (black, white and very dark frames, flicker,
