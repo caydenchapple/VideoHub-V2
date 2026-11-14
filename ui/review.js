@@ -150,6 +150,9 @@ export async function reviewPage(page, id, relArg = '') {
   const modeSeg = h('span', { class: 'segs', hidden: true }, modeBtns);
   const changedBtn = h('button', { hidden: true, onclick: () => playChanged() }, 'Watch only the changes');
   const proxyPill = h('span', { class: 'pill', title: 'Lightweight review copy for smooth frame stepping' }, '…');
+  // its text changes every second (fps, saving %): a fixed width and no refit of the bar on those changes, or the buttons around it
+  // jumped in and out as the text got longer and shorter (ui/review/dock.js, data-fit-static)
+  proxyPill.dataset.fitStatic = ''; proxyPill.classList.add('live-pill');
   const helpBtn = h('button', { class: 'ghost', title: 'How to use, all keyboard shortcuts (?)', onclick: () => toggleHelp() }, '❔ Help');
   const folderBtn = h('button', { class: 'ghost', title: 'Open project folder in ' + FILES_APP + ': ' + p.path, onclick: () => openFolder(id) }, '📂 Folder');
   const liveRefreshBtn = liveMode ? h('button', { class: 'ghost', title: 'Find the current page again and reload the code', onclick: async () => {
@@ -176,7 +179,7 @@ export async function reviewPage(page, id, relArg = '') {
   function paintSmooth() {
     if (!frameCache) return;
     const c = cacheInfo, on = frameCache.mode;
-    smoothBtn.classList.toggle('on', on);
+    smoothBtn.classList.toggle('on', on); paintSmoothBar();
     smoothBtn.title = !on ? 'Smooth playback is off. On: a film too heavy to draw live is drawn once in the background (while you are not using the preview) and then played from saved pictures at full speed.'
       : !c || c.state === 'idle' || c.state === 'checking' ? 'Smooth playback is on: checking how fast this film draws…'
       : c.state === 'light' ? 'Smooth playback is on: this film draws fast enough live, nothing needs saving.'
@@ -227,7 +230,7 @@ export async function reviewPage(page, id, relArg = '') {
   // stage
   // Smooth playback (review/framecache.js): a heavy film is drawn once in the background, then played from saved pictures
   let cacheInfo = null, lastLive = null;
-  const frameCache = liveMode ? createFrameCache({ onChange: ci => { cacheInfo = ci; paintSmooth(); paintLivePill(); } }) : null;
+  const frameCache = liveMode ? createFrameCache({ onChange: ci => { cacheInfo = ci; paintSmooth(); paintLivePill(); paintSmoothBar(); } }) : null;
   const liveSrc = liveMode ? createLiveSource(liveInfo, { onStatus: st => liveStatus(st), cache: frameCache }) : null;
   const liveCover = liveSrc ? createLiveCover({ source: liveSrc, save: data => api(`/api/project/${id}/live-thumb`, { method: 'POST', body: data }) }) : null;
   const videoA = liveSrc || h('video', { src: '/media?p=' + encodeURIComponent(cur.path), preload: 'auto', playsinline: true });
@@ -238,7 +241,31 @@ export async function reviewPage(page, id, relArg = '') {
   const tagA = h('span', { class: 'tag', hidden: true }), tagB = h('span', { class: 'tag tagb', hidden: true });
   // check tour: the frame from when the note was written, laid over the current one ("before")
   const beforeImg = h('img', { class: 'beforeimg', hidden: true, alt: '' }), beforeTag = h('span', { class: 'tag beforetag', hidden: true }, 'BEFORE · when the note was written');
-  const frameA = h('div', { class: 'frame' }, liveSrc ? liveSrc.el : videoA, videoB, diffCv, beforeImg, ov, wipeHandle, tagA, tagB, beforeTag);
+  // the loading bar while a heavy film is being saved for smooth playback (ui/review/framecache.js)
+  const sbLabel = h('span', { class: 'sb-label' }), sbFill = h('i'), sbOff = h('button', { class: 'ghost sb-off', title: 'Turn smooth playback off (the saved pictures are dropped)', onclick: () => { frameCache?.setMode(false); paintSmooth(); toast('Smooth playback off'); } }, 'Turn off');
+  const smoothBar = h('div', { class: 'smooth-bar', hidden: true }, h('div', { class: 'sb-top' }, sbLabel, sbOff), h('div', { class: 'sb-track' }, sbFill));
+  let sbDoneTimer = 0;
+  function paintSmoothBar() {
+    const c = cacheInfo; clearTimeout(sbDoneTimer);
+    if (!frameCache || !c || !c.mode) { smoothBar.hidden = true; return; }
+    if (c.state === 'checking' && c.phase === 'changes') {   // after a code change: which stretches of the film look different now
+      smoothBar.hidden = false; smoothBar.classList.remove('busy', 'done'); sbLabel.textContent = c.total ? `Checking what you changed ${c.pct}%` : 'Checking what you changed…'; sbFill.style.width = (c.total ? c.pct : 5) + '%'; return;
+    }
+    if (c.state === 'checking') { smoothBar.hidden = false; smoothBar.classList.add('busy'); sbLabel.textContent = 'Checking how fast this film draws…'; sbFill.style.width = '0'; return; }
+    if (c.state === 'building') {
+      smoothBar.hidden = false; smoothBar.classList.remove('busy', 'done');
+      const eta = c.etaSec != null && c.pct > 1 ? (c.etaSec >= 60 ? ` · about ${Math.ceil(c.etaSec / 60)} min left` : ` · about ${Math.max(5, Math.round(c.etaSec / 5) * 5)} s left`) : '';
+      sbLabel.textContent = c.waiting ? `Smooth playback ${c.pct}% · waiting until you stop` : `Getting smooth playback ready ${c.pct}%${eta}`;
+      sbFill.style.width = c.pct + '%'; return;
+    }
+    if (c.state === 'ready' || c.state === 'partial') {
+      smoothBar.hidden = false; smoothBar.classList.add('done'); smoothBar.classList.remove('busy'); sbFill.style.width = '100%';
+      sbLabel.textContent = c.state === 'partial' ? 'Smooth playback ready for the first part of the film' : 'Smooth playback ready';
+      sbDoneTimer = setTimeout(() => { smoothBar.hidden = true; }, 3500); return;
+    }
+    smoothBar.hidden = true;   // idle, or a film that draws fast enough
+  }
+  const frameA = h('div', { class: 'frame' }, liveSrc ? liveSrc.el : videoA, videoB, diffCv, beforeImg, ov, wipeHandle, tagA, tagB, beforeTag, smoothBar);
   // move the camera / objects right in the live picture (pages with window.VH_EDIT), saved to tweaks.json
   // each editor's panel goes into its own side-panel tab (added on open, removed on close), unscaled by the picture zoom
   const edHost = (tid, label) => {
@@ -833,10 +860,10 @@ export async function reviewPage(page, id, relArg = '') {
   function paintLivePill() {
     const st = lastLive; if (!st || !liveMode) return;   // (liveSrc itself does not exist yet when the first status arrives)
     proxyPill.title = 'Live preview: the film is drawn from its code, with no render. Reloads automatically when the code changes · click to reload now';
-    const c = cacheInfo, extra = !c || !c.mode ? '' : c.state === 'building' ? ` · saving ${c.pct}%` : c.state === 'checking' ? ' · checking speed' : (c.state === 'ready' || c.state === 'partial') ? ' · smooth' : '';
+    const c = cacheInfo, saving = c && c.mode && c.state === 'building', extra = !c || !c.mode ? '' : c.state === 'checking' ? (c.phase === 'changes' ? ' · updating' : ' · checking') : (c.state === 'ready' || c.state === 'partial') ? ' · smooth' : '';
     if (st.state === 'loading') { proxyPill.className = 'pill inceleme'; proxyPill.textContent = 'live · loading…'; }
     else if (st.state === 'error') { proxyPill.className = 'pill hâlâ-var'; proxyPill.textContent = 'live · error'; }
-    else { proxyPill.className = 'pill approved'; proxyPill.textContent = (st.fps != null && st.state === 'playing' ? `live · ${st.fps} fps` : 'live · ready') + extra; }
+    else { proxyPill.className = 'pill approved'; proxyPill.textContent = saving && !(st.state === 'playing' && st.fps != null) ? `live · saving ${c.pct}%` : saving ? `live · ${st.fps} fps · ${c.pct}%` : (st.fps != null && st.state === 'playing' ? `live · ${st.fps} fps` : 'live · ready') + extra; }
   }
   // ---------- narration text: timeline row + captions under the video
   api(`/api/project/${id}/transcript`).then(tr => { if (!tr?.ok) return; trData = tr; timeline.setTranscript(tr); transport.update(shownT()); updCaptions(); }).catch(() => { });

@@ -245,11 +245,14 @@ export function prompt(p, ids) {
     + `If this chat does not know the project yet, first read the STATE.md / CLAUDE.md / README files in its folder.`;
 }
 
+import { mcpStatus, sent as markSent, waitForSent } from './mcpstate.js';
+
 export function routes(route, readBody) {
   const need = id => { const p = project(id); if (!p) throw Object.assign(new Error('Project not found'), { code: 404 }); return p; };
   route('GET', '/api/project/:id/notes', (req, url, { id }) => list(need(id)));
   // a note change only moves the project's note counts: no rescan (that walks every file of a big project, once per note)
-  route('POST', '/api/project/:id/notes', async (req, url, { id }) => { const p = need(id); const n = await add(p, await readBody(req)); counts(p); return n; });
+  // (a note made by Claude's tools appears in an open review window at once; one made in the window itself is already there)
+  route('POST', '/api/project/:id/notes', async (req, url, { id }) => { const p = need(id), b = await readBody(req); const n = await add(p, b); counts(p); if (b.by === 'claude') emit(p, n, { by: 'claude' }); return n; });
   route('POST', '/api/project/:id/note/:nid', async (req, url, { id, nid }) => {
     const p = need(id); const b = await readBody(req); let n = update(p, nid, b, b.by || 'user');
     if (['t', 't2', 'at'].some(k => b[k] !== undefined)) n = await refreshRange(p, n, b.images);
@@ -258,6 +261,17 @@ export function routes(route, readBody) {
   route('POST', '/api/project/:id/note/:nid/delete', (req, url, { id, nid }) => { const p = need(id); const ok = remove(p, nid); counts(p); emit(p, null, { removed: +nid }); return { ok }; });
   route('GET', '/api/project/:id/notes/old', (req, url, { id }) => oldNotes(need(id)).map(n => n.id));
   route('POST', '/api/project/:id/notes/bulk', async (req, url, { id }) => { const p = need(id); const b = await readBody(req); const r = bulk(p, b.action, b.ids); counts(p); emit(p, null, { bulk: true }); return r; });
+  // "Send to Claude": the notes are marked as sent (a Claude that is listening through hub_wait_for_notes gets them at once);
+  // the answer says whether Claude is connected and listening, and carries the message to paste when it is not
+  route('POST', '/api/project/:id/send', async (req, url, { id }) => {
+    const p = need(id), b = await readBody(req), open = list(p).filter(n => b.ids ? b.ids.includes(n.id) : isOpenNote(n));
+    if (!open.length) throw Object.assign(new Error('There are no open notes to send'), { code: 400 });
+    const mcp = mcpStatus();   // before sending: a listening Claude stops listening the moment it has the notes
+    markSent(p.id, open.map(n => n.id));
+    return { count: open.length, text: prompt(p, b.ids), mcp };
+  });
+  // the MCP tool's long poll: answers { sent: true } when notes were sent (or are waiting), { sent: false } after `wait` seconds
+  route('GET', '/api/project/:id/inbox', async (req, url, { id }) => { const p = need(id); return waitForSent(p.id, Math.min(60, +url.searchParams.get('wait') || 0)); });
   route('POST', '/api/project/:id/prompt', async (req, url, { id }) => { const b = await readBody(req); return { text: prompt(need(id), b.ids) }; });
   route('GET', '/api/project/:id/noteimg/:nid/:kind', (req, url, { id, nid, kind }, res) => {
     const p = need(id), n = readJson(notesFile(p), []).find(x => x.id === +nid), f = n?.images?.[kind];   // no existence check of every note's pictures

@@ -70,10 +70,85 @@ export const TOOLS = {
       return [
         `Live preview ready: "${p.title}" · ${li.page} · ${li.fps} fps · ${TC(li.dur)} (length from: ${li.durFrom}) · sound: ${li.audioName || 'none'}`,
         how === 'window' ? 'The open VideoHub window shows this film (if the user is busy in another film it only offers a link, it never takes them away from it).' : how === 'opened' ? 'A VideoHub window opened.' : '',
-        'Now STOP, do not render. Tell the user (in their language): watch it in VideoHub, leave notes on the frames, then press "Send to Claude" and paste the message here. Get the notes with hub_notes, fix the code (the preview reloads itself), mark each with hub_note_update. Render with hub_render only when the user asks for a render.',
+        'Do not render. Tell the user in one sentence (in their language) to watch it in VideoHub, leave notes on the frames and press "Send to Claude"; then call hub_wait_for_notes: the notes arrive in that call, nobody has to paste anything. Fix the code (the preview reloads itself), mark each note with hub_note_update, then wait again. Render with hub_render only when the user asks for a render.',
         li.durFrom === 'default' ? 'The film length is unknown (60 s assumed): save it with hub_project({set:{render:{env:{DUR:"…"}}}}).' : '',
       ].filter(Boolean).join('\n');
     },
+  },
+  hub_wait_for_notes: {
+    description: 'Wait for the user to press "Send to Claude" in VideoHub and give back their notes (what hub_notes returns): no pasting, the notes arrive here. Call it right after hub_live and again after each round of fixes. It returns when the notes arrive, or after timeoutSec (default 90, at most 300) with "No notes yet": then call it again, or stop and say you will look when they tell you. If this tool is not available in the session, ask the user to press "Send to Claude" and paste the message.',
+    schema: {
+      project: z.string().optional().describe('Project folder, name or id. Default: the working folder.'),
+      timeoutSec: z.number().optional().describe('How long to wait in this call (5-300, default 90)'),
+    },
+    run: async (a, extra) => {
+      const p = await resolve(a.project);
+      const total = Math.min(300, Math.max(5, +a.timeoutSec || 90)), end = Date.now() + total * 1000, token = extra?._meta?.progressToken;
+      let beat = 0;
+      while (Date.now() < end) {
+        const left = Math.max(1, Math.min(20, Math.ceil((end - Date.now()) / 1000)));
+        const r = await call('GET', `/api/project/${p.id}/inbox?wait=${left}`, null, (left + 15) * 1000);
+        if (r.sent) return `The user sent notes from VideoHub on "${p.title}":\n` + await TOOLS.hub_notes.run({ project: p.id });
+        // a progress message now and then keeps clients that time out silent calls waiting
+        if (token != null && extra?.sendNotification) await extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: ++beat, message: 'Waiting for notes in VideoHub…' } }).catch(() => { });
+      }
+      const open = (await resolve(p.id)).notes?.filter(isOpen).length || 0;
+      return `No notes yet (waited ${total} s)${open ? ` — ${open} older open note${open === 1 ? '' : 's'} can be read with hub_notes` : ''}. The user is still watching the film in VideoHub. Call hub_wait_for_notes again to keep waiting, or tell the user you will look when they say so.`;
+    },
+  },
+  hub_review: {
+    description: 'Review a film the way a picky director would, with no render: it plays the film in a hidden browser and checks it for what makes it look wrong or generated: the picture shaking or snapping, a patch that wobbles, textures or shapes that swim or morph, lighting that jumps, objects that fall wrongly (floating, a dead stop, teleporting) and - when the film defines window.VH_BODIES (see hub_realism_guide) - exact physics: objects passing through each other, sunk into the ground, hovering, wrong gravity, size pops, jitter. It also checks the sound and the scene list. You get the findings (errors, warnings, info) with times and what to change, a contact sheet of the whole film and pictures of the worst moments: LOOK at them. Run it as soon as a film plays, fix the errors and warnings, run it again until it is clean, then hub_live. depth: quick | standard (default) | deep (every frame). notes:true also puts the errors and warnings into VideoHub as notes.',
+    schema: {
+      project: z.string().optional().describe('Project folder, name or id. Default: the working folder.'),
+      depth: z.enum(['quick', 'standard', 'deep']).optional().describe('quick = up to 8 frames a second, standard = 15 (default), deep = every frame of the film'),
+      images: z.boolean().optional().describe('false = text only (default true: a contact sheet and pictures of the worst moments)'),
+      notes: z.boolean().optional().describe('true = add the errors and warnings as notes in VideoHub ("Auto review: …")'),
+    },
+    run: async a => {
+      const p = await resolve(a.project);
+      const r = await call('POST', `/api/project/${p.id}/review`, { depth: a.depth, images: a.images }, 15 * 60e3);
+      const f = r.findings || [], st = r.stats || {}, by = s => f.filter(x => x.severity === s);
+      const fmt = (x, i) => `${i + 1}. ${TC(x.t0)}${x.t1 > x.t0 ? '–' + TC(x.t1) : ''}  ${x.title}${x.ids ? ` (${x.ids.join(', ')})` : ''}  [${Math.round((x.conf ?? 0.6) * 100)}% sure]\n   ${x.infos.join(' | ')}${x.fix ? `\n   Fix: ${x.fix}` : ''}`;
+      const lines = [`Review of "${p.title}": ${TC(st.dur || 0)} at ${st.fps} fps, ${st.frames} frames drawn (${st.sampleFps} a second, ${a.depth || 'standard'}). ${by('error').length} errors, ${by('warn').length} warnings, ${by('info').length} info.`,
+        st.bodies ? 'Physics: EXACT checks (the film reports its bodies with VH_BODIES).' : 'Physics: only approximate checks from the picture. Define window.VH_BODIES (hub_realism_guide, section 4) for exact checks of overlaps, gravity, floating and sinking.'];
+      if (st.pageErrors?.length) lines.push('The page logged errors: ' + st.pageErrors.join(' | '));
+      for (const [label, sev] of [['ERRORS (fix these)', 'error'], ['WARNINGS (fix unless on purpose)', 'warn'], ['INFO', 'info']]) { const l = by(sev); if (l.length) { lines.push('', label); l.slice(0, sev === 'info' ? 8 : 30).forEach((x, i) => lines.push(fmt(x, i))); if (l.length > (sev === 'info' ? 8 : 30)) lines.push(`… and ${l.length - (sev === 'info' ? 8 : 30)} more`); } }
+      if (!f.length) lines.push('', 'No findings: the automatic checks are clean. Still look at the pictures with the checklist in hub_realism_guide (section 6).');
+      const images = [];
+      if (r.sheet) { images.push({ data: r.sheet.data, mimeType: 'image/jpeg' }); lines.push('', `Picture 1: contact sheet of the film (12 moments, left to right, top to bottom: ${r.sheet.times.map(TC).join(' · ')}).`); }
+      (r.images || []).forEach((im, i) => { images.push({ data: im.data, mimeType: 'image/jpeg' }); lines.push(`Picture ${images.length}: ${im.label}`); });
+      if (images.length) lines.push('', 'Now look at these pictures yourself: floating or sinking things, overlaps, missing shadows, weightless motion, anything that looks generated or unnatural (checklist: hub_realism_guide section 6). The automatic checks cannot judge that.');
+      if (a.notes) {
+        const open = await call('GET', `/api/project/${p.id}/notes`).catch(() => []); let made = 0;
+        for (const x of f.filter(x => x.severity !== 'info' && !['noaudio'].includes(x.kind))) {
+          const text = `Auto review: ${x.title} — ${x.infos.join(' | ')}`;
+          if ((open || []).some(n => ['open', 'reopened', 'claude'].includes(n.status) && String(n.text || '').startsWith(`Auto review: ${x.title}`) && Math.abs((n.t ?? -9) - x.t0) < 0.3)) continue;
+          const im = (r.images || []).find(i => i.label.includes(x.title) && i.label.includes(TC(x.t0)));
+          await call('POST', `/api/project/${p.id}/notes`, { by: 'claude', t: x.t0, t2: x.t1 > x.t0 ? x.t1 : null, at: (x.t0 + x.t1) / 2, file: '~live', fps: st.fps, kind: 'visual', text, images: im ? { frame: 'data:image/jpeg;base64,' + im.data } : undefined }).catch(() => { }); made++;
+        }
+        lines.push('', `${made} note${made === 1 ? '' : 's'} added in VideoHub.`);
+      }
+      return { text: lines.join('\n'), images };
+    },
+  },
+  hub_frames: {
+    description: 'Look at the film: pictures of chosen moments (or evenly spaced across a range), drawn from its code with no render. Use it to inspect a moment closely, to check a fix, or to see what a note points at. Give times (seconds) or from/to/count. At most 12 pictures per call.',
+    schema: {
+      project: z.string().optional().describe('Project folder, name or id. Default: the working folder.'),
+      times: z.array(z.number()).optional().describe('Moments in seconds'),
+      from: z.number().optional(), to: z.number().optional(), count: z.number().optional().describe('count pictures evenly spaced from..to (default 6, at most 12)'),
+      width: z.number().optional().describe('Picture width in pixels (160-1024, default 512)'),
+    },
+    run: async a => {
+      const p = await resolve(a.project);
+      const r = await call('POST', `/api/project/${p.id}/frames`, { times: a.times, from: a.from, to: a.to, count: a.count, width: a.width }, 10 * 60e3);
+      return { text: `"${p.title}" (${TC(r.dur)} long): ${r.frames.length} picture${r.frames.length === 1 ? '' : 's'} at ${r.frames.map(f => TC(f.t)).join(' · ')}.`, images: r.frames.map(f => ({ data: f.data, mimeType: 'image/jpeg' })) };
+    },
+  },
+  hub_realism_guide: {
+    description: 'The realism guide for films made through VideoHub: real physics and gravity, natural motion, how to keep a cartoon believable, what makes a film look generated and how to avoid it, how to define window.VH_BODIES so hub_review can check physics exactly, the build-review-fix loop and a checklist for looking at the pictures. Read it before building a film and before calling hub_review.',
+    schema: {},
+    run: async () => fs.readFileSync(path.join(HUB_DIR, 'skill', 'videohub', 'REALISM.md'), 'utf8'),
   },
   hub_workspace: {
     description: 'Where this PC keeps its video work: the workspace folder and, inside it, the films folder (make every new film there, one folder per film), the outputs folder (finished renders are collected there by VideoHub; never write there yourself) and the other watched folders. Call it before creating a new film.',
@@ -338,3 +413,12 @@ export const TOOLS = {
     },
   },
 };
+
+// the MCP server's hello to the hub (server/mcpstate.js): lets VideoHub show "Claude is connected" / "listening". Never starts the hub.
+export async function heartbeat(id, name = 'claude') {
+  if (!(await ping())) return;
+  await fetch(BASE + '/api/mcp/hello', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, name, pid: process.pid }), signal: AbortSignal.timeout(2000) }).catch(() => { });
+}
+export async function goodbye(id) {
+  await fetch(BASE + '/api/mcp/bye', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }), signal: AbortSignal.timeout(1500) }).catch(() => { });
+}

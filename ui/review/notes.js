@@ -1,5 +1,5 @@
 // Notes panel: the draft note being written, the list of notes, edits, statuses, "send to Claude".
-import { h, api, toast, confirmBox, pill, TC, AGO } from '../app.js';
+import { h, api, toast, confirmBox, pill, TC, AGO, onHubEvent } from '../app.js';
 
 // Element.append prints null/false as text; this skips them like h() does.
 const put = (el, ...kids) => { for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c); return el; };
@@ -13,12 +13,26 @@ export function createNotesPanel(ctx) {
   const composerBox = h('div', {}), list = h('div', { class: 'rv2-list' });
   const draftsBox = h('div', { class: 'rv2-drafts', hidden: true });
   const sendBtn = h('button', { class: 'primary', onclick: send });
+  // is Claude connected to VideoHub (its MCP tools), and is it waiting for notes right now? (server/mcpstate.js)
+  const mcpLine = h('div', { class: 'rv2-mcp' });
+  let mcp = { connected: 0, waiting: 0, claudeFound: true };
+  function paintMcp() {
+    const on = mcp.connected > 0;
+    mcpLine.replaceChildren(...[
+      h('span', { class: 'mcp-dot' + (mcp.waiting ? ' live' : on ? ' on' : '') }),
+      h('span', { class: 'mcp-text' }, mcp.waiting ? 'Claude is waiting for your notes' : on ? 'Claude is connected' : 'Claude is not connected'),
+      on ? null : h('button', { class: 'ghost mcp-connect', title: 'Connect Claude Code to VideoHub so it reads your notes itself', onclick: () => connectDialog() }, 'Connect')].filter(Boolean));
+    mcpLine.title = mcp.waiting ? 'Claude is listening: "Send to Claude" delivers the notes at once, nothing to paste.' : on ? 'Claude has VideoHub\'s tools. It reads your notes when it checks (or at once while it is waiting for them).' : 'Without the connection, "Send to Claude" copies a message that you paste into the chat.';
+  }
+  paintMcp();
+  try { api('/api/mcp/status').then(s => { mcp = s; paintMcp(); }).catch(() => { }); } catch { }   // (a panel built without a server, as in the tests, just shows "not connected")
+  try { onHubEvent('mcp', s => { mcp = { ...mcp, ...s }; paintMcp(); }); } catch { }
   const tourBtn = h('button', { class: 'tourbtn', hidden: true, title: 'Review Claude\'s fixes one by one: before/after, approve or mark as still there', onclick: () => ctx.startTour() });
   // notes written before the newest version, cleared in one go (approve all, or take them off the list into the archive)
   const oldBar = h('div', { class: 'rv2-oldbar', hidden: true });
   const el = h('div', { class: 'rv2-notes' },
     h('div', { class: 'rv2-nhead' }, h('b', {}, 'Notes'), tourBtn, h('span', { class: 'spacer' }), filterSel),
-    h('div', { class: 'rv2-nfoot' }, sendBtn), oldBar, draftsBox, composerBox, list);
+    h('div', { class: 'rv2-nfoot' }, mcpLine, sendBtn), oldBar, draftsBox, composerBox, list);
   // pictures the user opened (a card is rebuilt when its note changes; keep it open)
   const openImg = new Set();
   // notes written before the newest version: asked from the hub when the list is loaded or changed in bulk,
@@ -201,10 +215,44 @@ export function createNotesPanel(ctx) {
     tourBtn.hidden = !fixed; tourBtn.textContent = `✓ Check fixes (${fixed})`;
     if (!oldAsked && notes.length) refreshOld(); else drawOld();
   }
+  const copy = async (text, done) => { try { await navigator.clipboard.writeText(text); toast(done); return true; } catch { return false; } };
+  // "Send to Claude": the notes are marked as sent. A Claude that is waiting for them (hub_wait_for_notes) has them at once; one that is
+  // only connected is told how to pick them up; without a connection there is one click to connect, or the message to paste.
   async function send() {
-    const { text } = await api(`/api/project/${ctx.projectId}/prompt`, { method: 'POST', body: {} });
-    try { await navigator.clipboard.writeText(text); toast('Message copied to the clipboard. Paste it into the project chat.'); }
-    catch { await confirmBox('Paste into chat', h('textarea', { style: { width: '100%', minHeight: '90px' } }, text), 'OK'); }
+    let r;
+    try { r = await api(`/api/project/${ctx.projectId}/send`, { method: 'POST', body: {} }); } catch (e) { toast(e.message, true); return; }
+    mcp = { ...mcp, ...r.mcp }; paintMcp();
+    const n = `${r.count} ${r.count === 1 ? 'note' : 'notes'}`;
+    if (r.mcp.waiting) { toast(`Sent: Claude has your ${n} now.`); return; }
+    if (r.mcp.connected) {
+      const ok = await confirmBox('Sent to Claude', h('div', {}, h('p', {}, `Your ${n} ${r.count === 1 ? 'is' : 'are'} ready for Claude. Claude is connected to VideoHub but is not waiting for them right now.`),
+        h('p', { class: 'dim' }, 'Tell it "check VideoHub" in your chat and it reads the notes itself. Or copy the message and paste it.')), 'Copy message');
+      if (ok && !(await copy(r.text, 'Message copied. Paste it into the project chat.'))) await confirmBox('Paste into chat', h('textarea', { style: { width: '100%', minHeight: '90px' } }, r.text), 'OK');
+      return;
+    }
+    connectDialog(r);
+  }
+  // Claude is not connected: connect with one click, or copy the message to paste
+  async function connectDialog(r) {
+    const status = h('div', { class: 'dim', style: { marginTop: '8px' } });
+    const cmd = h('input', { readonly: true, style: { width: '100%' }, value: mcp.command || '' });
+    api('/api/mcp/status').then(s => { mcp = { ...mcp, ...s }; if (s.command) cmd.value = s.command; }).catch(() => { });
+    const connectBtn = h('button', { class: 'primary', onclick: async () => {
+      connectBtn.disabled = true; status.textContent = 'Connecting…';
+      try {
+        const c = await api('/api/mcp/connect', { method: 'POST', body: {} });
+        status.textContent = c.ok ? 'Connected. Start a NEW Claude Code session so it sees VideoHub\'s tools (sessions that are already open do not).' : `${c.why} Copy the command below and run it in a terminal.`;
+        if (c.command) cmd.value = c.command;
+      } catch (e) { status.textContent = 'Could not connect: ' + e.message; }
+      connectBtn.disabled = false;
+    } }, 'Connect Claude');
+    const body = h('div', {},
+      h('p', {}, r ? `Your ${r.count} ${r.count === 1 ? 'note is' : 'notes are'} saved, but Claude is not connected to VideoHub, so it cannot read them by itself.` : 'Claude is not connected to VideoHub yet.'),
+      h('div', { class: 'row', style: { gap: '8px' } }, connectBtn, r ? h('button', { onclick: async () => { if (!(await copy(r.text, 'Message copied. Paste it into the project chat.'))) await confirmBox('Paste into chat', h('textarea', { style: { width: '100%', minHeight: '90px' } }, r.text), 'OK'); } }, 'Copy the message instead') : null),
+      status,
+      h('div', { class: 'dim', style: { marginTop: '10px', fontSize: '12px' } }, 'Or connect by hand (run this in a terminal):'),
+      h('div', { class: 'row', style: { gap: '6px' } }, cmd, h('button', { class: 'ghost', onclick: () => copy(cmd.value, 'Command copied') }, 'Copy')));
+    await confirmBox('Connect Claude to VideoHub', body, 'Done');
   }
   // scrolls the list only: scrollIntoView also scrolled the page, so picking a note in a narrow window moved the
   // player and timeline away from under the mouse

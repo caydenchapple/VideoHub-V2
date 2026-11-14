@@ -30,6 +30,9 @@ import { openFile } from './open-file.js';
 import { transcript } from './transcript.js';
 import { ramHogs, programList } from './ramhogs.js';
 import { audioReport } from './audioscan.js';
+import { reviewFilm, filmFrames, reviewBusy } from './review.js';
+import { mcpStatus, hello as mcpHello, bye as mcpBye, onMcpChange, waitingCount } from './mcpstate.js';
+import { connectCommand, connectNow, findClaude } from './claudecli.js';
 import { focusState, saveFocus, releaseFocus } from './focus.js';
 import * as thumbstudio from './thumbstudio/store.js';
 
@@ -165,6 +168,22 @@ route('GET', '/api/project/:id/audioscan', async (req, url, { id }) => {
   if (!li.ok) return { ok: false, reason: li.reason };
   return audioReport(li.audioPath, li.dur);
 });
+// the MCP review (server/review.js): the film is played in a hidden browser, checked, and pictures of the worst moments come back
+route('POST', '/api/project/:id/review', async (req, url, { id }) => {
+  const p = project(id); if (!p) throw Object.assign(new Error('Project not found'), { code: 404 });
+  const b = await readBody(req), li = await live.liveInfo(p);
+  if (!li.ok) throw Object.assign(new Error('The live preview cannot open this film: ' + li.reason), { code: 400 });
+  return reviewFilm({ url: `http://127.0.0.1:${port}${li.url}`, info: li, depth: ['quick', 'standard', 'deep'].includes(b.depth) ? b.depth : 'standard', images: b.images !== false, audioFile: li.audioPath || null });
+});
+route('POST', '/api/project/:id/frames', async (req, url, { id }) => {
+  const p = project(id); if (!p) throw Object.assign(new Error('Project not found'), { code: 404 });
+  const b = await readBody(req), li = await live.liveInfo(p);
+  if (!li.ok) throw Object.assign(new Error('The live preview cannot open this film: ' + li.reason), { code: 400 });
+  let times = Array.isArray(b.times) ? b.times.map(Number).filter(Number.isFinite) : [];
+  if (!times.length) { const from = Math.max(0, +b.from || 0), to = Math.min(li.dur, +b.to || li.dur), n = Math.min(12, Math.max(1, Math.round(+b.count || 6))); times = Array.from({ length: n }, (_, i) => n === 1 ? from : from + (to - from) * i / (n - 1)); }
+  times = times.slice(0, 12).map(t => Math.min(Math.max(0, t), Math.max(0, li.dur - 0.01)));
+  return { dur: li.dur, frames: await filmFrames({ url: `http://127.0.0.1:${port}${li.url}`, info: li, times, width: Math.min(1024, Math.max(160, +b.width || 512)) }) };
+});
 route('PUT', '/api/project/:id/autoscan', async (req, url, { id }) => {
   const p = project(id); if (!p) throw Object.assign(new Error('Project not found'), { code: 404 });
   const b = await readBody(req);
@@ -288,6 +307,12 @@ route('POST', '/api/project/:id/delete-folder', async (req, url, { id }) => {
   if (bad.length < res.length) dropProject(id);
   return { ok: !bad.length, results: res, error: bad[0]?.error || null };
 });
+// Is Claude connected, is it listening? (server/mcpstate.js) and the one-click connect
+onMcpChange(s => broadcast('mcp', s));
+route('GET', '/api/mcp/status', () => ({ ...mcpStatus(), claudeFound: !!findClaude(), command: connectCommand().text }));
+route('POST', '/api/mcp/hello', async (req) => { const b = await readBody(req); mcpHello(b); return { ok: true }; });
+route('POST', '/api/mcp/bye', async (req) => { const b = await readBody(req); mcpBye(b.id); return { ok: true }; });
+route('POST', '/api/mcp/connect', async () => connectNow());
 // Focus: slow the programs you tick while a render runs (macOS), see server/focus.js
 route('GET', '/api/focus', async () => ({ ...focusState(), programs: focusState().supported ? (await programList({ fresh: true })).map(g => ({ name: g.name, bytes: g.bytes, procs: g.procs })) : [] }));
 route('POST', '/api/focus', async (req) => {
@@ -425,7 +450,7 @@ async function alwaysOn() {
 }
 setInterval(async () => {
   const g = guardState();
-  if (clients.size || jobs.busy() || cleanStatus()?.state === 'running' || notesApi.busyPictures() || media.makingCopies() || index().scanning || (!GUARD_OFF && g.running && (g.renders || []).length)) { lastUse = Date.now(); return; }
+  if (clients.size || waitingCount() || jobs.busy() || cleanStatus()?.state === 'running' || notesApi.busyPictures() || media.makingCopies() || index().scanning || (!GUARD_OFF && g.running && (g.renders || []).length)) { lastUse = Date.now(); return; }
   if (Date.now() - lastUse < IDLE_MS || await alwaysOn()) return;
   console.log('VideoHub: not in use, closing together with the render protection.');
   if (!GUARD_OFF) await quitGuard().catch(() => { });
@@ -453,7 +478,7 @@ const server = http.createServer(async (req, res) => {
   const why = foreign(req);
   if (why) { res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('VideoHub: only VideoHub windows and tools on this computer may use this server (' + why + ')'); }
   const url = new URL(req.url, 'http://127.0.0.1');
-  if (url.pathname !== '/api/ping') lastUse = Date.now();   // RenderGuard's keep-alive ping is not a use
+  if (url.pathname !== '/api/ping' && url.pathname !== '/api/mcp/hello') lastUse = Date.now();   // hellos are not use   // RenderGuard's keep-alive ping is not a use
   try {
     for (const r of routes) {
       if (r.method !== req.method) continue;

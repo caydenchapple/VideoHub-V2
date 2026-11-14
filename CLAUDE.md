@@ -72,7 +72,7 @@ user; do not work around them. Uninstall: `uninstall.ps1` (`-DryRun` too).
 
 ## Map (short)
 - `server/hub.js` HTTP + SSE; `scan.js` projects; `live.js` live preview; `notes.js` notes; `jobs.js` render queue;
-  `tools.js` the `hub_*` tools (`mcp.js`, `cli.js`); `legacy.js` + `ui/values.js` stored values and legacy aliases;
+  `tools.js` the `hub_*` tools (`mcp.js`, `cli.js`; image results as `{text, images}`); `mcpstate.js` Claude connected/listening; `review.js` + `ui/review/scanlib.js` the AI review; `legacy.js` + `ui/values.js` stored values and legacy aliases;
   `config.js` settings and default folders (the workspace, `Documents\VideoHub\…` by default); `encoders.js` render
   encoders; `scripts/init-config.mjs` setup's config helper.
 - `ui/app.js` pages, `ui/review*` review editor, `ui/thumbstudio*` Thumbnail Studio. Icons: write a label with its symbol ("📂 Folder", "🗑", "⏸") and `ui/icons.js` draws it as a line icon (add a character to its `MAP`/`SHAPES` for a new one); never draw the system's emoji picture.

@@ -1,6 +1,6 @@
 ---
 name: videohub
-description: How Claude makes and reviews videos with VideoHub, the user's local hub for videos written as code (project catalog, live preview that plays a film from its code with no render, review notes on frames, a protected one-at-a-time render queue with partial re-renders). Use whenever the user asks for a video, animation, explainer, short or film made in code; whenever a video project is previewed, rendered, re-rendered, reviewed or cleaned up; when the user mentions VideoHub, review notes, "Send to Claude", the render queue, or pastes a "VideoHub: N notes on …" or "VideoHub Thumbnail: …" message; and for thumbnails made from a VideoHub sketch (hub_thumb_*).
+description: How Claude makes and reviews videos with VideoHub, the user's local hub for videos written as code (project catalog, live preview that plays a film from its code with no render, review notes on frames, a protected one-at-a-time render queue with partial re-renders). Use whenever the user asks for a video, animation, explainer, short or film made in code; whenever a video project is previewed, rendered, re-rendered, reviewed or cleaned up; when the user mentions VideoHub, review notes, "Send to Claude", the render queue, or pastes a "VideoHub: N notes on …" or "VideoHub Thumbnail: …" message; and for thumbnails made from a VideoHub sketch (hub_thumb_*). Also whenever a film must look realistic, natural, physically believable or not "AI-looking": read REALISM.md and use hub_review.
 ---
 
 # VideoHub workflow
@@ -14,6 +14,10 @@ frames, draws on them and leaves notes, and where renders are queued one at a ti
 | Tool | Use |
 |---|---|
 | `hub_live({project?, open?})` | Open the film in the live preview — it plays from its code, no render. Call it as soon as a new film plays, then stop and wait for the user's notes. |
+| `hub_wait_for_notes({project?, timeoutSec?})` | Wait for the user to press **Send to Claude** in VideoHub and get their notes in this call (what `hub_notes` returns): nothing is pasted. Call it right after `hub_live` and after each round of fixes; when it says "No notes yet", call it again or stop and say you will look when they ask. |
+| `hub_review({project?, depth?, images?, notes?})` | Review the film like a picky director, no render: plays it in a hidden browser and checks for shaking, snapping, wobbling, swimming/morphing textures, lighting jumps, falls that look wrong and - when the film defines `window.VH_BODIES` - exact physics (overlaps, gravity, floating, sinking, teleporting, jitter), plus the sound and the scene list. Returns errors/warnings/info with times and what to change, a contact sheet and pictures of the worst moments to LOOK at. |
+| `hub_frames({project?, times? \| from,to,count?, width?})` | Pictures of chosen moments of the film (up to 12) to inspect a moment or check a fix. |
+| `hub_realism_guide()` | The realism guide (also `REALISM.md` in this skill's folder): real physics and gravity, natural motion, cartoon-but-believable, what looks generated, `VH_BODIES`, the review loop and the checklist for looking at pictures. |
 | `hub_workspace()` | Where this PC keeps its video work: the workspace, the films folder for new films, the outputs folder. Call it before creating a new film. |
 | `hub_project({project?, set?})` | Find the project (folder / name / id; default: the working folder): status, versions, open notes, render recipe. `set` saves `title`, `status`, `render` (`env.DUR`, `workers`, `mux`). |
 | `hub_notes({project?})` | The user's open notes: time, frame, chunks, text, picture paths. Marks them "claude". |
@@ -45,24 +49,34 @@ themselves when it is not running.
      Keep the template's script as it is: it reads frames straight from a single full-size canvas (keep the picture on
      one `VW`×`VH` canvas, no HTML text over it, or it falls back to slower screenshots) and uses the graphics-card
      encoder chosen in VideoHub (`VIDEOHUB_ENCODER`).
+   - **Make it believable.** Before you write the film read `REALISM.md` (or `hub_realism_guide()`): real gravity (9.81 m/s²), weight,
+     contact with the ground and with each other, natural easing, one source of motion per object, no random noise per frame, stable
+     shapes and textures; exaggerate timing and squash on top of real physics so it is a cartoon that obeys physics. Define
+     `window.VH_BODIES(t)` / `window.VH_SCALE` (the template shows how) so the review can check the physics exactly.
 3. Save the film's length once: `hub_project({project, set:{title, status:"in-progress", render:{workers:2, env:{DUR:"<seconds>"}}}})`.
    If the sound is mastered with its own ffmpeg command, save it as `render.mux` (array of ffmpeg args with `{video}`
    and `{out}`); otherwise the queue puts `audio/mix.wav` (first render) or the previous final's sound under the picture.
 4. Check it yourself cheaply if you need to (a few stills: `node render.js snap 1 4.5 9`), never a full render.
 
-## 2. It plays → open it in VideoHub and STOP
+## 2. It plays → review it yourself, then open it in VideoHub and listen
 
-Call `hub_live({project: "<film folder>"})`. Do **not** render. Then tell the user, **in the user's own language**,
-in one or two sentences: the film is open in VideoHub's live preview; watch it, click on any frame (or draw on it) to
-leave a note, and press **Send to Claude** when done, then paste the message here.
+1. **Review it first.** `hub_review({project})` and look at the pictures it returns (contact sheet + worst moments) with the
+   checklist in `REALISM.md`. Fix every error and every warning that is not on purpose, run it again, repeat until it is clean (2-3
+   rounds is normal). Use `hub_frames` to look closely at any moment. Do not show the user a film you have not reviewed.
+2. Call `hub_live({project: "<film folder>"})`. Do **not** render. Tell the user in one or two sentences, **in the user's own
+   language**: the film is open in VideoHub's live preview; watch it, click on any frame (or draw on it) to leave a note, and
+   press **Send to Claude** when done.
+3. Then call `hub_wait_for_notes({project})`: the notes arrive in that call, nothing has to be pasted. If it says "No notes yet",
+   call it again (a few times) or stop and say you will look when they ask. If the tool is not available in this session, the user
+   presses **Send to Claude** and pastes the message (VideoHub shows a **Connect** button for that).
 If `hub_live` says the page cannot play live, fix the page (the reason says what is missing). Only if the user asked
-for a finished video outright, or the film cannot have a live page, go straight to a render — and say so.
+for a finished video outright, or the film cannot have a live page, go straight to a render - and say so.
 Do the same after any big change to an already rendered film.
 
 ## 3. Notes arrive → fix them in code
 
-The pasted message starts `VideoHub: N notes on "…"` and names the project folder: pass it as `project` to every
-`hub_*` call, whatever folder this chat runs in. If this chat does not know the project yet, read its
+The notes come from `hub_wait_for_notes` (or a pasted message starting `VideoHub: N notes on "…"`, which names the project folder):
+pass the project as `project` to every `hub_*` call, whatever folder this chat runs in. If this chat does not know the project yet, read its
 STATE.md / CLAUDE.md / README first.
 1. `hub_notes({project})` → for each note open the `close-up` picture with Read (the full annotated frame only if the
    close-up is not enough). Do not render frames or contact sheets to find the moment: the note gives time, frame and chunk.
@@ -71,7 +85,7 @@ STATE.md / CLAUDE.md / README first.
 2. Fix the cause **in the code**. Notes marked `LIVE PREVIEW` need no render at all: the user's open preview reloads by
    itself when a file changes.
 3. `hub_note_update({project, id, status:"fixed", reply:"<one sentence>"})` for each note.
-4. Tell the user in 1–2 sentences what changed and to check it in VideoHub. Do not re-review the whole film yourself.
+4. Tell the user in 1–2 sentences what changed and to check it in VideoHub, then `hub_wait_for_notes` again. After a change that touches motion or physics, run `hub_review` again so a fix does not break something else; do not re-review the whole film for a small fix.
 A note with status `reopened` ("STILL THERE") means your last fix did not work: read the user's new text and your
 previous reply before trying again.
 

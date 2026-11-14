@@ -1,4 +1,4 @@
-# VideoHub
+# VideoHub V2
 
 **A local review studio and render queue for videos that Claude Code writes as code.**
 You ask Claude Code for a video; it builds the film as a web page that draws every frame in code. VideoHub plays that
@@ -7,6 +7,10 @@ wrong. One click sends your notes to Claude, Claude fixes the code, the open pre
 you are happy do you render — once, in a queue that keeps your PC usable, and later re-rendering only the seconds that
 changed. It is for people who make explainers, shorts and animations with Claude Code and are tired of rendering a
 whole film to check one fix.
+
+> **VideoHub V2** continues [TensaikunYT/Videohub](https://github.com/TensaikunYT/Videohub) (MIT, © VideoHub contributors) as its own project:
+> a native macOS version (Electron app, Finder/Trash/Notification Center, VideoToolbox), smooth playback for heavy films, Focus mode, a
+> better Scan, a direct Claude connection (MCP) and an AI review for realism and physics. Windows keeps working.
 
 > **Windows 10/11 and macOS.** This fork adds a native macOS port of the original Windows-only VideoHub: the same hub, review
 > editor and queue, with Finder, the Trash, Notification Center, `launchd` and Apple's VideoToolbox encoder in place of
@@ -32,6 +36,16 @@ whole film to check one fix.
   clipping, a level far too quiet or loud, a length that does not match the picture) and its scene list (gaps, overlaps).
   Findings are sorted into errors, warnings and info, you can ignore the ones that are on purpose, and the next scan says
   how many are fixed or new. **Fix all** makes one note per error and warning and copies the message for Claude: one paste.
+- **Claude connection (MCP)** — no pasting: with the `videohub` MCP server connected, **Send to Claude** delivers the notes
+  straight to a Claude that is waiting for them (`hub_wait_for_notes`); a line above the button says whether Claude is
+  *waiting*, *connected* or *not connected*, and **Connect** registers the tools with one click (or shows the command to copy).
+  Without a connection the button copies the message to paste, as before.
+- **AI review (MCP)** — `hub_review` lets Claude review its own film before you see it: it plays the film in a hidden browser and
+  checks for shaking, snapping, wobbling, swimming or morphing textures, lighting jumps, falls that look wrong and, when the film
+  reports its objects (`window.VH_BODIES`), exact physics: objects passing through each other, sinking, hovering, wrong gravity,
+  teleporting, jitter. It returns errors/warnings with times and fixes, a contact sheet and pictures of the worst moments for
+  Claude to look at; `hub_frames` shows any moment; `hub_realism_guide` is the guide for real physics that still looks like a
+  cartoon. The same checks run in the review page's Scan panel.
 - **Check fixes** — a tour through the notes Claude marked fixed, with before/after; "Still there" sends one back.
 - **Render queue** — one render at a time on the PC, waits for renders started elsewhere, progress and ETA, a
   render dialog with size/fps/workers/encoder, a copy to any folder, a Windows notification when it is done.
@@ -89,7 +103,7 @@ Windows 10/11 or macOS 12+ (Apple Silicon or Intel).
 - [Claude Code](https://claude.com/claude-code), for the Claude side
 - Nothing else: macOS' own VideoToolbox does the hardware video encoding (Apple Silicon and Intel Macs)
 
-Install: `git clone https://github.com/caydenchapple/Videohub.git VideoHub`, then double-click **`SETUP.command`** (or run
+Install: `git clone https://github.com/caydenchapple/VideoHub-V2.git VideoHub`, then double-click **`SETUP.command`** (or run
 `./setup.sh` in Terminal; the first time, right-click → Open if macOS asks about an unidentified developer). It asks the
 same plain questions as the Windows setup, builds **VideoHub.app** in `~/Applications` (an Electron app: a native window around the hub with its own Dock icon;
 Launchpad and Spotlight find it; a one-time ~150 MB Electron download) and can start VideoHub at login (a LaunchAgent). Every option is also a flag: `./setup.sh --yes --workspace ~/Movies/VideoHub --startup no`;

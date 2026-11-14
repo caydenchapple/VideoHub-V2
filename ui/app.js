@@ -57,7 +57,7 @@ let rendersCache = null; const renderSubs = new Set();
 const es = new EventSource('/api/events');
 // VideoHub closes itself when unused; if this window outlived it, say how to bring it back (EventSource keeps retrying)
 let downTimer = null;
-const downBar = h('div', { class: 'downbar', hidden: true }, 'The VideoHub server is off (it shut down because it was idle). Click the VideoHub shortcut on your desktop; this window will reconnect automatically.');
+const downBar = h('div', { class: 'downbar', hidden: true }, 'The VideoHub server is off (it shut down because it was idle). ' + (IS_MAC ? 'Open VideoHub again from Launchpad or Spotlight' : 'Click the VideoHub shortcut on your desktop') + '; this window will reconnect automatically.');
 document.body.append(downBar);
 es.addEventListener('error', () => { if (!downTimer) downTimer = setTimeout(() => { downBar.hidden = false; }, 4000); });
 es.addEventListener('open', () => { clearTimeout(downTimer); downTimer = null; if (!downBar.hidden) location.reload(); });

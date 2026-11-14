@@ -11,6 +11,7 @@ export function createLiveSource(info, { onStatus, cache = null } = {}) {
   let displayedTime = 0, destroyed = false, loadVersion = 0, seekVersion = 0, seekTimer = 0, playTimer = 0;
   let wantPlay = false;   // play asked for while the page was loading: start once it is ready
   let overlayOn = false;   // the picture on screen is a saved one from the cache, not the film page's own
+  let shownFrame = null;   // the film page that is on screen (a newer one may be loading out of sight)
   let base = { t: 0, at: 0 }, raf = 0, need = false, rvfc = [], frames = 0, fpsAt = performance.now(), drawMs = 0, scale = 1;
   const audio = info.audio ? h('audio', { src: info.audio, preload: 'auto' }) : null;
   const src = new EventTarget();
@@ -27,11 +28,17 @@ export function createLiveSource(info, { onStatus, cache = null } = {}) {
     if (destroyed) return;
     const version = ++loadVersion;
     clearTimeout(playTimer); playTimer = 0; rvfc = [];
-    cache?.reset(); overlayOn = false;   // new code: the saved pictures are out of date
+    // a reload: the page already on screen stays there, with the picture it shows, until the new page is ready (then they swap), so the
+    // screen only changes when there is something new to show. The saved pictures are kept but checked again (framecache.js).
+    const replacing = !!shownFrame;
+    if (replacing) cache?.invalidate(); else cache?.reset();
+    overlayOn = false;
     ready = false; status({ state: 'loading' });
+    if (iframe && iframe !== shownFrame) iframe.remove();   // an earlier new page that never got ready
     const f = h('iframe', { class: 'live', src: `${info.url}${info.url.includes('?') ? '&' : '?'}vh=${Date.now()}`, scrolling: 'no', tabindex: '-1' });
     f.style.width = info.w + 'px'; f.style.height = info.h + 'px'; f.style.transform = `scale(${scale})`;
-    if (iframe) iframe.replaceWith(f); else box.append(f);
+    if (replacing) f.style.visibility = 'hidden';
+    box.append(f);
     iframe = f;
     const t0 = performance.now();
     clearInterval(waitTimer);
@@ -41,7 +48,10 @@ export function createLiveSource(info, { onStatus, cache = null } = {}) {
       const err = win && win.__vhError;
       if (err) { clearInterval(wait); status({ state: 'error', error: err }); return; }
       if (win && win.READY === true && typeof win.renderOut === 'function') {
-        clearInterval(wait); ready = true; status({ state: 'ready', ms: Math.round(performance.now() - t0) }); cache?.attach(cacheApi);
+        clearInterval(wait); ready = true;
+        if (shownFrame && shownFrame !== iframe) shownFrame.remove();   // the swap: the new page takes the screen
+        iframe.style.visibility = ''; shownFrame = iframe;
+        status({ state: 'ready', ms: Math.round(performance.now() - t0) });
         if (wantPlay) playTimer = setTimeout(() => { playTimer = 0; if (!destroyed && version === loadVersion && wantPlay) play(); }, 50);
         // the page may know its own timing and size better (the 3D studio sets window.__config)
         let c = win.__config || win.VH_CONFIG;
@@ -57,6 +67,7 @@ export function createLiveSource(info, { onStatus, cache = null } = {}) {
           const w = +(c.outWidth || c.width), hh = +(c.outHeight || c.height); if (w && hh) { info.w = w; info.h = hh; iframe.style.width = w + 'px'; iframe.style.height = hh + 'px'; }
         }
         present(); fire('loadedmetadata'); fire('timeupdate');
+        cache?.attach(cacheApi);   // after the first draw: it looks at what the page shows
       } else if (performance.now() - t0 > 120000) { clearInterval(wait); status({ state: 'error', error: 'The page was not ready within 2 minutes (no READY signal).' }); }
     }, 100);
     f.addEventListener('load', () => { try { f.contentWindow.addEventListener('error', e => { f.contentWindow.__vhError = e.message; }); } catch { } });
@@ -123,11 +134,25 @@ export function createLiveSource(info, { onStatus, cache = null } = {}) {
     if (!paused) return Promise.resolve();   // HTMLVideoElement.play() is idempotent; never rewind to the last rendered frame.
     wantPlay = false;
     if (t >= info.dur - 1e-3) t = 0;
+    // saved pictures here: wait (a moment) until the first ones are decoded, so playback does not open with a slow live draw
+    // (after a code change the saved pictures are being checked for a few seconds: wait for that too, then play from them)
+    if (cache && (cache.staleNow() || cache.covers(t))) {
+      if (!warming) {
+        warming = true; const tok = ++warmTok;
+        cache.whenFresh().then(() => cache.covers(t) ? cache.warm(t) : null).then(() => { warming = false; if (!destroyed && paused && tok === warmTok) startPlaying(); });
+      }
+      return Promise.resolve();
+    }
+    startPlaying(); return Promise.resolve();
+  }
+  let warming = false, warmTok = 0;   // a pause while the first pictures are being decoded cancels the start
+  function startPlaying() {
     paused = false; base = { t, at: performance.now() }; cache?.playing(true);
     if (audio) { try { audio.currentTime = t; audio.playbackRate = rate; } catch { } audio.play().catch(() => { }); }
-    fire('play'); return Promise.resolve();
+    fire('play');
   }
   function pause() {
+    warmTok++;
     const waited = wantPlay; wantPlay = false;
     if (paused) { if (waited) fire('pause'); return; }
     pauseAt(seeking ? t : displayedTime);
@@ -177,6 +202,7 @@ export function createLiveSource(info, { onStatus, cache = null } = {}) {
     info, box, iframe: () => iframe, busy: () => !ready || destroyed || seeking || need,
     now: () => paused ? t : Math.min(info.dur, clock()),
     grab: (at, width) => { win.renderOut(clampTime(at)); return copyPicture(width); },
+    copy: width => copyPicture(width),
     restore: () => { try { win.renderOut(displayedTime); } catch { } },
   };
 
@@ -227,7 +253,7 @@ export function createLiveSource(info, { onStatus, cache = null } = {}) {
       }
       load(); wantPlay = wasPlaying;
     },
-    fit(w) { scale = w / info.w; if (iframe) iframe.style.transform = `scale(${scale})`; },
+    fit(w) { scale = w / info.w; for (const x of new Set([iframe, shownFrame])) if (x) x.style.transform = `scale(${scale})`; },
     destroy() { destroyed = true; ready = false; paused = true; wantPlay = false; ++loadVersion; clearInterval(waitTimer); clearTimeout(playTimer); clearSeek(); cancelAnimationFrame(raf); rvfc = []; audio?.pause(); if (audio) { audio.removeAttribute('src'); audio.load(); } iframe?.remove(); win = null; },
     // the review player calls these on <video>; nothing to do here
     removeAttribute() { }, load() { },

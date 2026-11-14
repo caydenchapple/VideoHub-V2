@@ -5,6 +5,7 @@
 // The sound and the scene list are checked too (server/audioscan.js; window.VH_SCENES), the report says what changed since the last scan,
 // and "Fix all" makes one note per error/warning and copies the message for Claude in one go.
 import { h, api, toast, confirmBox } from '../app.js';
+import { analyzeFrames, sceneIssues as sceneIssuesOf, REVIEW_KINDS } from './scanlib.js';
 
 const KIND = {
   lens: ['Camera inside an object', '#ff6b6b'], bones: ['Character embedded / underground', '#ff6b6b'],
@@ -18,6 +19,8 @@ const KIND = {
 // what each finding means for the film: errors are broken, warnings are probably unintended, info may well be on purpose
 const SEV = { lens: 'error', bones: 'error', clip: 'error', sync: 'error', white: 'warn', black: 'warn', overlay: 'warn', acting: 'warn', flicker: 'warn', pop: 'warn', dark: 'warn', quiet: 'warn', noaudio: 'warn', scenes: 'warn', frozen: 'info', hold: 'info', silence: 'info', cut: 'info' };
 const SEV_LABEL = { error: 'Errors', warn: 'Warnings', info: 'Info' };
+// the motion, physics and lighting checks live in scanlib.js (shared with the MCP review); their kinds join the list here
+for (const [k, [title, sev]] of Object.entries(REVIEW_KINDS)) if (!KIND[k]) { KIND[k] = [title, { error: '#ff6b6b', warn: '#ffb547', info: '#58a6ff' }[sev]]; SEV[k] ||= sev; }
 const sig = (r) => r.kind + '@' + Math.round(r.t0 * 2) / 2;   // a finding is "the same" when its kind and time (to half a second) are
 const TC = (s) => { const m = Math.floor(s / 60), r = s - m * 60; return `${m}:${r.toFixed(2).padStart(5, '0')}`; };
 const N = 160 * 90;
@@ -52,7 +55,8 @@ export function createAutoScan({ src, projectId, frame, panelHost, onOpen, onClo
     tg.drawImage(cv, 0, 0, 160, 90);
     const px = tg.getImageData(0, 0, 160, 90).data, buf = new Uint8Array(N); let sum = 0;
     for (let i = 0; i < N; i++) { buf[i] = Math.round(px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114); sum += buf[i]; }
-    return { t, mean: sum / N, lumBuf: buf, bones: [], inside: 0, near: -1, shot: w.__qaShot ? w.__qaShot() : '' };
+    let bodies; if (typeof w.VH_BODIES === 'function') { try { bodies = JSON.parse(JSON.stringify(w.VH_BODIES(t))); } catch { } }
+    return { t, mean: sum / N, lumBuf: buf, bones: [], inside: 0, near: -1, shot: w.__qaShot ? w.__qaShot() : '', bodies };
   }
 
   // the range to scan: whole film, or the shot on screen (from cut to cut, VH_EDIT.findCut)
@@ -135,6 +139,14 @@ export function createAutoScan({ src, projectId, frame, panelHost, onOpen, onClo
       }
     }
     const gap = Math.max(0.25, step / F * 1.5), ranges = [];
+    // motion, physics and lighting (scanlib.js): needs frames close enough in time (at least every other frame), on a smaller picture to stay quick
+    // (a quick scan, 4 frames a second, is too coarse for picture motion but fine for the film's own bodies)
+    if (res.length >= 8) {
+      const half = b => { const o = new Uint8Array(80 * 45); for (let y = 0; y < 45; y++) for (let x = 0; x < 80; x++) { const i = y * 2 * 160 + x * 2; o[y * 80 + x] = (b[i] + b[i + 1] + b[i + 160] + b[i + 161]) >> 2; } return o; };
+      const frames = res.map((r) => ({ t: r.f / F, luma: half(r.lumBuf), w: 80, h: 45, bodies: r.bodies }));
+      const sc = win()?.VH_SCALE || {}, cutTimes = (win()?.VH_SCENES || []).map((s) => +s.t0).filter(Number.isFinite);
+      for (const x of analyzeFrames(frames, { fps: F / step, metersPerHeight: sc.metersPerHeight || null, ground: sc.ground ?? 0, cutTimes, only: step <= 2 ? ['shake', 'snap', 'wobble', 'morph', 'lightstep', 'fall', 'teleport', 'overlap', 'sunk', 'floating', 'gravity', 'deadstop', 'jitter', 'scalepop'] : ['overlap', 'sunk', 'floating', 'gravity', 'teleport', 'scalepop'] })) ranges.push({ kind: x.kind, shot: '', t0: x.t0, t1: x.t1, n: x.n || 1, infos: x.infos });
+    }
     // a stretch that is dark but not black for 0.6 s or more (a missing light, a fade that never comes back)
     for (let k = 0, s = -1; k <= res.length; k++) {
       const dark = k < res.length && res[k].mean < 22 && res[k].mean >= 6;
@@ -151,23 +163,7 @@ export function createAutoScan({ src, projectId, frame, panelHost, onOpen, onClo
     return ranges;
   }
 
-  // window.VH_SCENES = [{name, t0, t1}]: a gap, an overlap, an empty scene or scenes that stop short of the film
-  function sceneIssues() {
-    const S = win()?.VH_SCENES, D = dur(), out = [], add = (t0, t1, info) => out.push({ kind: 'scenes', shot: '', t0: +t0.toFixed(3), t1: +Math.max(t0, t1).toFixed(3), n: 1, infos: [info] });
-    if (!Array.isArray(S) || !S.length) return out;
-    const L = S.filter((s) => s && Number.isFinite(+s.t0) && Number.isFinite(+s.t1)).map((s) => ({ name: s.name || '?', t0: +s.t0, t1: +s.t1 })).sort((p, q) => p.t0 - q.t0);
-    L.forEach((s, i) => {
-      if (s.t1 <= s.t0) add(s.t0, s.t0, `scene "${s.name}" has no length`);
-      const nx = L[i + 1];
-      if (nx && nx.t0 < s.t1 - 0.01) add(nx.t0, s.t1, `"${s.name}" and "${nx.name}" overlap by ${(s.t1 - nx.t0).toFixed(2)} s`);
-      else if (nx && nx.t0 > s.t1 + 0.05) add(s.t1, nx.t0, `no scene between "${s.name}" and "${nx.name}" for ${(nx.t0 - s.t1).toFixed(2)} s`);
-    });
-    if (L[0].t0 > 0.05) add(0, L[0].t0, `the first scene "${L[0].name}" starts at ${L[0].t0.toFixed(2)} s`);
-    const last = L[L.length - 1];
-    if (D && last.t1 < D - 0.05) add(last.t1, D, `the scenes end ${(D - last.t1).toFixed(2)} s before the film does`);
-    if (D && last.t1 > D + 0.05) add(D, last.t1, `the last scene runs ${(last.t1 - D).toFixed(2)} s past the film's end`);
-    return out;
-  }
+  const sceneIssues = () => sceneIssuesOf(win()?.VH_SCENES, dur());
 
   async function postNote(r, image) {
     const t = (r.t0 + r.t1) / 2, img = image && src.capture ? src.capture(t, 1280) : null;

@@ -82,6 +82,18 @@ The page is served at `/live/<id>/…` from the project folder (absolute `src`/`
 the project). Folders `render, out, snaps, chunks*, node_modules, .videohub, tmp, profiles, vh2d, vhaudio` and
 `tweaks.json` do not trigger a reload.
 
+### 2.1 Objects and physics (optional, recommended): `window.VH_BODIES` and `window.VH_SCALE`
+`hub_review` (and the review page's Scan panel) check a film's motion. From the picture alone they can only guess at physics; a
+film that reports where its objects are gets exact checks of **overlaps** (two bodies sharing space), **sinking** into the ground,
+**hovering** without support, **gravity** (free flight should follow y = y0 + v0·t − 4.905·t², real 9.81 m/s²; a cartoon may use 0.6–1.6 ×),
+**teleporting**, **size pops**, **dead stops** in the air and **jitter**.
+- `window.VH_BODIES = t => [{ id, pos: [x, y, z], size: [w, h, d] | r, static?, grounded?, flying?, parent?, allowOverlap?, teleports?, scales? }]`
+  — pure, called with the same `t` as `renderOut(t)`. Metres, y up, `pos` is the body's centre, `size` its full extents (or `r` for a sphere).
+  `grounded` = resting on a surface, `flying` = held up on purpose, `parent` = the id of what it is attached to (overlap allowed).
+- `window.VH_SCALE = { metersPerHeight, ground }` — how many metres the picture is tall (lets the picture-based fall check use real
+  units) and the y of the ground (default 0).
+- The realism guide with the rules and the build → review → fix loop: `skill/videohub/REALISM.md` (also the `hub_realism_guide` tool).
+
 ## 3. Outputs: how videos are classified
 
 Every video in the project is probed with ffprobe and gets a role:
