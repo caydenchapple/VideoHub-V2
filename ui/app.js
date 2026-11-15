@@ -144,6 +144,46 @@ function updateLive() {
   );
 }
 
+// ---------- updates (bottom left): "Check for updates", then "Download update and restart" (server/updater.js)
+function updateBox() {
+  const host = $('#upd'); if (!host) return;
+  let st = null, busyNow = false;
+  const post = (path) => api(path, { method: 'POST' });
+  const draw = () => {
+    if (!st) return;
+    // an older server process (started before this version) has no update routes: say so instead of showing a blank version
+    if (!st.current) { host.replaceChildren(h('div', { class: 'upd-msg' }, 'Quit and reopen VideoHub once to turn on updates.')); return; }
+    const working = ['checking', 'downloading', 'installing', 'restarting'].includes(st.phase);
+    const rows = [h('div', { class: 'upd-ver' }, 'VideoHub v' + st.current)];
+    if (st.message) rows.push(h('div', { class: 'upd-msg' + (st.phase === 'error' ? ' err' : st.available ? ' accent' : '') }, st.message));
+    if (st.available && st.latest?.notes && !working) rows.push(h('div', { class: 'upd-notes', title: st.latest.notes }, st.latest.notes.split('\n')[0].replace(/^- /, '')));
+    if (st.available && !working) rows.push(h('button', { class: 'primary upd-btn', onclick: install }, 'Download update and restart' + (st.latest?.bytes ? ' (' + GB(st.latest.bytes) + ')' : '')));
+    else rows.push(h('button', { class: 'upd-btn', disabled: working || busyNow || !st.configured, title: st.configured ? '' : 'No update address is set', onclick: check }, st.phase === 'checking' ? 'Checking…' : 'Check for updates'));
+    host.replaceChildren(...rows);
+  };
+  const draw0 = () => host.replaceChildren(h('div', { class: 'upd-msg' }, 'Quit and reopen VideoHub once to turn on updates.'));
+  const check = async () => { busyNow = true; try { st = await post('/api/update/check'); } catch (e) { st = { ...(st || {}), phase: 'error', message: e.message }; } busyNow = false; draw(); };
+  const install = async () => {
+    if (!await confirmBox('Update VideoHub?', h('p', {}, `VideoHub will download version ${st.latest.version}, install it and restart. Your films, notes and settings are not touched, and the old code is saved in VideoHub's data folder first. Do not close the window meanwhile.`), 'Download and restart')) return;
+    busyNow = true; draw();
+    try { st = await post('/api/update/apply'); } catch (e) { st = { ...(st || {}), phase: 'error', message: e.message }; toast(e.message, true); }
+    busyNow = false; draw();
+    if (st.phase === 'restarting') waitForRestart();
+  };
+  // the hub restarts itself: when a different server process answers, load the new interface
+  const waitForRestart = async () => {
+    let old = null; try { old = (await api('/api/ping')).pid; } catch { }
+    for (let i = 0; i < 90; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try { const p = await api('/api/ping'); if (p.pid && p.pid !== old) return location.reload(); } catch { }
+    }
+    location.reload();
+  };
+  api('/api/update').then(s => { st = s && s.current ? s : null; if (!st) return draw0(); draw(); if (st.phase === 'restarting') waitForRestart(); }).catch(draw0);
+  onHubEvent('update', s => { st = s; draw(); });
+}
+updateBox();
+
 // ---------- router
 const pages = { outputs: outputsPage, projects: projectsPage, p: projectPage, review: reviewPage, renders: rendersPage, disk: diskPage, settings: settingsPage, thumbstudio: thumbnailStudioPage };
 let cleanup = null;

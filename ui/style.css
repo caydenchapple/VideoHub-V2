@@ -221,3 +221,11 @@ button.primary .ico { opacity: 1; }
 .focuspanel .fname { flex: 1; }
 .focuspanel .fmeta { font-size: 12.5px; }
 .focuspanel .focus-status { font-size: 13px; }
+
+/* updates box, bottom left of the side bar */
+.side .upd { padding: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.upd-ver { color: var(--text); font-weight: 600; }
+.upd-msg.err { color: #ff8b8b; } .upd-msg.accent { color: var(--accent); }
+.upd-notes { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upd-btn { width: 100%; padding: 7px 8px; font-size: 12px; white-space: normal; line-height: 1.25; }
+.upd-btn[disabled] { opacity: .55; cursor: default; }

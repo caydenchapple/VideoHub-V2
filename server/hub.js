@@ -34,6 +34,7 @@ import { reviewFilm, filmFrames, reviewBusy } from './review.js';
 import { mcpStatus, hello as mcpHello, bye as mcpBye, onMcpChange, waitingCount } from './mcpstate.js';
 import { connectCommand, connectNow, findClaude } from './claudecli.js';
 import { focusState, saveFocus, releaseFocus } from './focus.js';
+import { updateState, checkUpdate, applyUpdate, onUpdate, setUpdateBase, updateBase } from './updater.js';
 import * as thumbstudio from './thumbstudio/store.js';
 
 const UI = path.join(HUB_DIR, 'ui');
@@ -324,6 +325,12 @@ route('POST', '/api/focus', async (req) => {
   await focusNow().catch(() => { });
   return focusState();
 });
+// App updates: check Zephyr's release manifest, download, install and restart (server/updater.js)
+onUpdate(s => broadcast('update', s));
+route('GET', '/api/update', () => updateState());
+route('POST', '/api/update/check', async () => checkUpdate());
+route('POST', '/api/update/config', async (req) => { const b = await readBody(req); setUpdateBase(b.url); return updateState(); });
+route('POST', '/api/update/apply', async () => applyUpdate({ busy: () => jobs.busy() ? 'A render is running or queued. Update when it is finished.' : cleanStatus()?.state === 'running' ? 'A cleanup is running. Update when it is finished.' : '' }));
 route('GET', '/api/renders', () => rendersPayload(true));
 route('POST', '/api/renders/cmd', async (req) => {
   const { action, rootPid } = await readBody(req);
