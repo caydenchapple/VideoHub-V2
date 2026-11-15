@@ -1,6 +1,6 @@
 {
   "name": "videohub",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Local hub (Windows and macOS) for videos that Claude Code writes as code: project catalog, live preview with no render, frame-accurate review notes sent back to Claude, a protected one-at-a-time render queue with partial re-renders, and MCP tools for Claude.",
   "license": "MIT",
@@ -24,6 +24,7 @@
     "win32",
     "darwin"
   ],
+  "videohub": { "updateUrl": "https://t-web-latest-cayden-videohub-updates-videohub-cayden-ze.zephyrcloud.app" },
   "scripts": {
     "release:build": "node scripts/make-release.mjs",
     "release": "node scripts/release.mjs",

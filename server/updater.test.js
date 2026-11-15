@@ -15,6 +15,7 @@ test('versions compare numerically, and a pre-release is older than its release'
 test('a manifest must have a version, a plain tar.gz name next to it and a SHA-256', () => {
   const ok = { version: '0.2.0', file: 'videohub-0.2.0.tar.gz', sha256: 'a'.repeat(64), bytes: 10 };
   assert.equal(readManifest(ok).version, '0.2.0');
+  assert.equal(readManifest({ ...ok, file: 'videohub-0.2.0.tar' }).file, 'videohub-0.2.0.tar');
   assert.throws(() => readManifest({ ...ok, file: '../evil.tar.gz' }));
   assert.throws(() => readManifest({ ...ok, file: 'https://evil.example/x.tar.gz' }));
   assert.throws(() => readManifest({ ...ok, sha256: 'abc' }));

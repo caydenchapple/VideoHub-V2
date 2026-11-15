@@ -1,4 +1,5 @@
-// Builds a release folder for the updater: release/videohub-<version>.tar.gz + release/manifest.json (+ a small index.html).
+// A plain .tar, not .tar.gz: Zephyr's edge unpacks .gz files on the way out, which would break the checksum.
+// Builds a release folder for the updater: release/videohub-<version>.tar + release/manifest.json (+ a small index.html).
 //   node scripts/make-release.mjs [--notes "what changed"]
 // Upload that folder to the Zephyr application with: node scripts/release.mjs   (see docs/UPDATES.md)
 import fs from 'node:fs';
@@ -17,9 +18,9 @@ const gitNotes = () => { const r = spawnSync('git', ['log', '-5', '--pretty=- %s
 const notes = arg('notes') || gitNotes();
 
 fs.rmSync(out, { recursive: true, force: true }); fs.mkdirSync(out, { recursive: true });
-const file = `videohub-${version}.tar.gz`, tgz = path.join(out, file);
+const file = `videohub-${version}.tar`, tgz = path.join(out, file);
 const items = RELEASE_ITEMS.filter(i => fs.existsSync(path.join(root, i)));
-const r = spawnSync('tar', ['-czf', tgz, ...RELEASE_EXCLUDE.flatMap(e => ['--exclude', e]), '-C', root, ...items], { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } });
+const r = spawnSync('tar', ['-cf', tgz, ...RELEASE_EXCLUDE.flatMap(e => ['--exclude', e]), '-C', root, ...items], { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } });
 if (r.status !== 0) { console.error('tar failed'); process.exit(1); }
 const buf = fs.readFileSync(tgz);
 const manifest = { name: 'videohub', version, file, sha256: crypto.createHash('sha256').update(buf).digest('hex'), bytes: buf.length, date: new Date().toISOString(), notes };

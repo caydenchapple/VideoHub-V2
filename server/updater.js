@@ -45,7 +45,7 @@ export function readManifest(m) {
   const version = String(m.version || '');
   if (!/^\d+(\.\d+){0,3}(-[\w.]+)?$/.test(version)) throw new Error('The update information has no valid version.');
   const file = String(m.file || '');
-  if (!/^[\w.-]+\.tar\.gz$/.test(file)) throw new Error('The update information names an invalid file.');
+  if (!/^[\w.-]+\.tar(\.gz)?$/.test(file)) throw new Error('The update information names an invalid file.');
   const sha256 = String(m.sha256 || '').toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error('The update information has no valid checksum.');
   return { version, file, sha256, bytes: +m.bytes || 0, date: m.date || null, notes: String(m.notes || '').slice(0, 2000) };
@@ -113,7 +113,7 @@ export async function applyUpdate({ busy = () => '', restart = true } = {}) {
     if (m.bytes && got !== m.bytes) throw new Error('The download is incomplete. Nothing was changed; try again.');
     if (await sha256File(pkg) !== m.sha256) throw new Error('The download does not match its checksum, so it was not installed. Nothing was changed.');
     set({ phase: 'installing', message: 'Installing…' });
-    const x = spawnSync('tar', ['-xzf', pkg, '-C', path.join(tmp, 'x')], { encoding: 'utf8' });
+    const x = spawnSync('tar', ['-xf', pkg, '-C', path.join(tmp, 'x')], { encoding: 'utf8' });
     if (x.status !== 0) throw new Error('Could not unpack the update: ' + (x.stderr || '').trim().slice(0, 200));
     const src = path.join(tmp, 'x');
     if (!fs.existsSync(path.join(src, 'server', 'hub.js')) || currentVersion(src) !== m.version) throw new Error('The package is not the version it says it is. Nothing was changed.');
