@@ -100,7 +100,8 @@ function lite(p) {
   const { outputs, meta, ...rest } = p;
   const canLive = live.liveCapable(p);
   const lo = outputs.find(o => o.rel === p.latest);   // no final yet: the film's length (manifest / DUR / sound), not a preview's
-  return { ...rest, label: shortPath(p.path) + (p.group ? ' · ' + p.group : ''), latestDur: (lo?.role === 'final' ? lo.dur : p.filmDur || lo?.dur) || 0, outputsCount: outputs.length, live: canLive, thumbVersion: canLive ? live.codeRevision(p) : String(p.latest || '') + ':' + String(lo?.mtime || p.updated || 0), silentCovered: outputs.filter(o => o.role === 'silent' && o.coveredBy).length };
+  const waiting = canLive ? live.waitingFor(p, index().projects) : null;
+  return { ...rest, waiting, label: shortPath(p.path) + (p.group ? ' · ' + p.group : ''), latestDur: (lo?.role === 'final' ? lo.dur : p.filmDur || lo?.dur) || 0, outputsCount: outputs.length, live: canLive, thumbVersion: canLive ? live.codeRevision(p) : String(p.latest || '') + ':' + String(lo?.mtime || p.updated || 0), silentCovered: outputs.filter(o => o.role === 'silent' && o.coveredBy).length };
 }
 // what this PC has of the required and optional parts (Settings shows it; features without their part explain why)
 function integrations() {
@@ -403,6 +404,7 @@ route('POST', '/api/show', async (req) => {
 route('GET', '/api/project/:id/live', async (req, url, { id }) => {
   const p = project(id); if (!p) throw Object.assign(new Error('Project not found'), { code: 404 });
   const info = await live.liveInfo(p);
+  if (info.ok) info.waiting = live.waitingFor(p, index().projects);
   if (info.ok && !url.searchParams.get('probe')) live.watch(p, ev => broadcast('live-changed', ev));
   return info;
 });

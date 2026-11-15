@@ -467,3 +467,12 @@
 .rv2-mcp .mcp-dot.live { background: #3fb950; box-shadow: 0 0 0 3px rgba(63,185,80,.25); }
 .rv2-mcp .mcp-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rv2-nfoot .rv2-mcp .mcp-connect { width: auto; flex: none; padding: 1px 9px; font-size: 12px; }
+
+/* a film that is still an unchanged copy of another one */
+.wp-wrap { display: grid; place-items: center; min-height: 70vh; }
+.waiting-page { max-width: 460px; text-align: center; display: grid; gap: 12px; justify-items: center; }
+.waiting-page h1 { font-size: 20px; margin: 0; } .waiting-page p { color: var(--muted); margin: 0; line-height: 1.5; }
+.waiting-page .row { display: flex; gap: 8px; margin-top: 6px; }
+.waiting-spin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--accent); animation: wpspin 1s linear infinite; }
+@keyframes wpspin { to { transform: rotate(360deg); } }
+.livebadge.waiting { color: #e8b04a; }

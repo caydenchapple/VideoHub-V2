@@ -1,6 +1,6 @@
 {
   "name": "videohub",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Local hub (Windows and macOS) for videos that Claude Code writes as code: project catalog, live preview with no render, frame-accurate review notes sent back to Claude, a protected one-at-a-time render queue with partial re-renders, and MCP tools for Claude.",
   "license": "MIT",

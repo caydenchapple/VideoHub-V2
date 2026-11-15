@@ -8,6 +8,7 @@ import { probe, isInside } from './util.js';
 import { readMeta } from './legacy.js';
 import { vhDir } from './notes.js';
 import { recipe } from './jobs.js';
+import crypto from 'node:crypto';
 import { sourceRevision, invalidateSource, watchSource } from './source-revision.js';
 
 const MIME = {
@@ -69,6 +70,42 @@ export function liveCapable(p) {
     }
   } catch { }
   capCache.set(p.id, { stamp, ok }); return ok;
+}
+
+// "Waiting for the film": a project that is still an unchanged copy of another project (Claude copies a finished film as its starting point,
+// then rewrites it). Until its code changes it would play the OTHER film, so the card and the page say it is waiting instead.
+// Fingerprint = a hash per file of the entry page and the local scripts it loads (cached by size and time). A project is a copy when each of
+// its files is byte-identical to the other project's file of the same path (the original may have more files); the newer folder is the copy.
+const fpCache = new Map();
+export function codeFingerprint(p) {
+  try {
+    const meta = readMeta(path.join(vhDir(p), 'project.json'), {});
+    const page = pageOf(p, { script: meta.render?.script || p.render?.script || 'render.js', env: meta.render?.env || {} }, meta);
+    if (!page) return null;
+    const htmlFile = path.join(p.path, page), html = fs.readFileSync(htmlFile, 'utf8');
+    const files = [htmlFile];
+    for (const m of html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)) {
+      if (/^(https?:)?\/\//i.test(m[1])) continue;
+      const f = path.resolve(path.dirname(htmlFile), m[1].split('?')[0].split('#')[0]);
+      if (isInside(f, p.path) && fs.existsSync(f)) files.push(f);   // a copy may lack files the original had
+    }
+    const key = files.map(f => { const st = fs.statSync(f); return f + ':' + st.size + ':' + Math.round(st.mtimeMs); }).join('|'), c = fpCache.get(p.id);
+    if (c && c.key === key) return c.fp;
+    const fp = new Map();
+    for (const f of files) { if (fs.statSync(f).size > 60e6) return null; fp.set(path.relative(p.path, f), crypto.createHash('sha1').update(fs.readFileSync(f)).digest('hex')); }
+    fpCache.set(p.id, { key, fp }); return fp;
+  } catch { return null; }
+}
+export function waitingFor(p, all) {
+  if (!p || p.studio || p.group || (p.outputs || []).length) return null;   // a film that was rendered is not waiting
+  const fp = codeFingerprint(p); if (!fp || !fp.size) return null;
+  const born = q => { try { return fs.statSync(q.path).birthtimeMs; } catch { return 0; } };
+  for (const q of all || []) {
+    if (q.id === p.id || q.studio || q.group || q.rootType === 'media') continue;
+    const o = codeFingerprint(q); if (!o) continue;
+    if ([...fp].every(([k, v]) => o.get(k) === v) && born(p) > born(q)) return { id: q.id, title: q.title || q.name };   // p is the newer folder: the copy
+  }
+  return null;
 }
 
 // the film's sound: a mix in audio/, else the inputs of render.mux, else any audio file, else the last render's track

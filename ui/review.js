@@ -52,6 +52,23 @@ const HELP = [
   ['+ / − / 0 / 1', 'zoom in / zoom out / fit / 100%'], ['Space + drag', 'pan while zoomed in'], ['Ctrl + scroll', 'zoom the video or timeline (scrolling the ruler also zooms)'], ['F', 'fullscreen'], ['U', 'mute / unmute'], ['C', 'show narration text below the video'], ['Y / B', 'during a fix check: approve / before ⇄ after'], ['? or H', 'this list'],
 ];
 
+// the film is still an unchanged copy of another one: say so and wait (the page opens the film by itself the moment its code changes)
+function waitingPage(page, id, p, copyOf) {
+  const box = h('div', { class: 'waiting-page' },
+    h('div', { class: 'waiting-spin' }),
+    h('h1', {}, (p.title || p.name) + ' is waiting for its film'),
+    h('p', {}, 'Claude is still writing this film. Its code is still an unchanged copy of "' + copyOf.title + '", so playing it now would show that other film. This page opens the film by itself as soon as its code changes.'),
+    h('div', { class: 'row' },
+      h('button', { onclick: () => { location.hash = `#/review/${id}/~live?show=1`; } }, 'Show the copy anyway'),
+      h('button', { onclick: () => { location.hash = `#/p/${id}`; } }, 'Project page')));
+  page.append(h('div', { class: 'wp-wrap' }, box));
+  const t = setInterval(async () => {
+    const li = await api(`/api/project/${id}/live?probe=1`).catch(() => null);
+    if (li?.ok && !li.waiting) { clearInterval(t); location.hash = `#/review/${id}/~live`; location.reload(); }
+  }, 3000);
+  return () => clearInterval(t);
+}
+
 export async function reviewPage(page, id, relArg = '') {
   const [rel0, qs] = String(relArg).split('?');
   const params = new URLSearchParams(qs || '');
@@ -63,6 +80,7 @@ export async function reviewPage(page, id, relArg = '') {
   if (liveMode) {
     liveInfo = await api(`/api/project/${id}/live`).catch(e => ({ ok: false, reason: e.message }));
     if (!liveInfo.ok) { page.append(h('div', { class: 'empty' }, 'Could not open live preview: ' + liveInfo.reason)); return; }
+    if (liveInfo.waiting && params.get('show') !== '1') return waitingPage(page, id, p, liveInfo.waiting);   // an unchanged copy of another film: do not play that one
   }
   let cur = liveMode ? { rel: '~live', name: (p.title || p.name) + ' (live)', path: null, fps: liveInfo.fps, dur: liveInfo.dur, w: liveInfo.w, h: liveInfo.h }
     : vids.find(o => o.rel === rel0) || vids.find(o => o.rel === p.latest) || (rel0 ? vids[0] : null);

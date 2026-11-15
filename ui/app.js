@@ -302,9 +302,10 @@ function projectCard(p) {
   const thumb = h('div', { class: 'thumb' + (p.outputsCount ? ' playable' : ''), title: p.live ? 'Live preview from the latest code' : p.outputsCount ? 'Play the latest render' : null,
     onclick: e => { e.stopPropagation(); openProject(p); } },
     p.latestDur ? h('span', { class: 'dur' }, DUR(p.latestDur)) : null, p.outputsCount ? h('span', { class: 'play' }, '▶') : null,
-    p.live ? h('span', { class: 'livebadge', title: 'Live preview available: plays from code, no render needed' }, '● live') : null);
-  if (!p.outputsCount) thumb.append(h('div', { class: 'noimg' }, p.emptyNote || 'no video yet'));
-  if (p.outputsCount || p.live) { thumb.dataset.thumb = p.id; thumb.dataset.version = p.thumbVersion || p.updated || ''; if (p.live) thumb.dataset.live = '1'; thumbObserver.observe(thumb); }
+    p.waiting ? h('span', { class: 'livebadge waiting', title: 'Still an unchanged copy of another film' }, '● waiting')
+      : p.live ? h('span', { class: 'livebadge', title: 'Live preview available: plays from code, no render needed' }, '● live') : null);
+  if (!p.outputsCount) thumb.append(h('div', { class: 'noimg' }, p.waiting ? 'Waiting for the film: Claude is still writing it (the code is an unchanged copy of "' + p.waiting.title + '")' : p.emptyNote || 'no video yet'));
+  if (p.outputsCount || (p.live && !p.waiting)) { thumb.dataset.thumb = p.id; thumb.dataset.version = p.thumbVersion || p.updated || ''; if (p.live) thumb.dataset.live = '1'; thumbObserver.observe(thumb); }
   return h('div', { class: 'card', onclick: () => openProject(p) }, thumb,
     h('div', { class: 'body' },
       h('div', { class: 't', title: p.label }, p.title),
