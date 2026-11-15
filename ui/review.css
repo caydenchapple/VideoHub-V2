@@ -84,7 +84,7 @@
 .app.app-editor:not(.side-peek) > .side .nav a { font-size: 0; justify-content: center; padding: 8px 0; position: relative; gap: 0; }
 .app.app-editor:not(.side-peek) > .side .nav a::before { font-size: 17px; line-height: 1; }
 .app.app-editor:not(.side-peek) > .side .nav .count { position: absolute; top: 1px; right: 0; font-size: 9.5px; padding: 0 4px; margin: 0; line-height: 14px; }
-.app.app-editor:not(.side-peek) > .side .live { display: none; }
+.app.app-editor:not(.side-peek) > .side .live, .app.app-editor:not(.side-peek) > .side .upd { display: none; }
 .app.app-editor .nav a[data-nav=projects]::before { content: ''; }
 .app.app-editor .nav a[data-nav=renders]::before { content: ''; }
 .app.app-editor .nav a[data-nav=outputs]::before { content: ''; }
